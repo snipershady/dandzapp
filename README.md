@@ -1,4 +1,4 @@
-# dandzapp
+# D&Zapp
 
 Tavolo virtuale per giocare a Dungeons & Dragons BECMI a distanza. Requisiti, stack e piano di sviluppo sono in [`CLAUDE.md`](CLAUDE.md).
 
