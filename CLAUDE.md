@@ -1,7 +1,7 @@
 # CLAUDE.md — Tavolo Virtuale per D&D (BECMI)
 
 > File di contesto per lo sviluppo con Claude Code.
-> Stato: **raccolta requisiti dell'MVP**. Lo stack tecnico verrà definito in seguito: le sezioni che lo riguardano sono segnate come *da decidere*.
+> Stato: **raccolta requisiti dell'MVP**, stack tecnico definito (§15). L'applicazione è **autonoma**: gestisce da sé utenti, autenticazione, permessi e persistenza (MySQL), e ospita **più partite** in parallelo.
 > Lingua del progetto, dell'interfaccia e della documentazione: **italiano**.
 
 ---
@@ -17,7 +17,7 @@ Un **tavolo di gioco virtuale** per giocare a Dungeons & Dragons a distanza con 
 
 Il Master controlla cosa vedono i giocatori; i giocatori tirano i dadi e muovono le proprie pedine. La voce resta fuori dal tavolo (Discord, Meet o simili).
 
-Il progetto nasce da un **prototipo funzionante** (una pagina web pubblicata su claude.ai, link: https://claude.ai/artifact/8F3mGLarh24Ek9rnsqmMsG) usato per la "Sessione 0 – Il santuario sepolto". Questo documento descrive quel prototipo come base dei requisiti dell'MVP e raccoglie quanto imparato usandolo.
+Il progetto nasce da un **prototipo di prova** usato per la "Sessione 0 – Il santuario sepolto". Il prototipo è solo un **riferimento funzionale** (cosa fa il tavolo, come appare, quali problemi di gioco sono emersi): la sua piattaforma, il suo sistema di accesso e il suo modo di salvare i dati **non sono vincoli** e non vanno riprodotti.
 
 ### Principi guida
 
@@ -32,7 +32,7 @@ Il progetto nasce da un **prototipo funzionante** (una pagina web pubblicata su 
 ## 2. Contesto d'uso
 
 - **Gioco:** D&D edizione BECMI (Base, Expert), campagna su Mystara, attualmente negli Emirati di Ylaruam.
-- **Gruppo:** 1 Master (Marco, proprietario del tavolo) + 6 giocatori, tutti da remoto.
+- **Gruppo tipo:** 1 Master (un utente `ROLE_MASTER`) + circa 6 giocatori (utenti `ROLE_PLAYER`), tutti da remoto. Il gruppo descritto sotto è il primo caso d'uso, non l'unico: il software ospita **più partite indipendenti**, ciascuna con il proprio Master e i propri giocatori; lo stesso giocatore può partecipare a più partite (relazione molti-a-molti, vedi §4 e RF-05).
 - **Sessioni:** circa 2 ore, serali, con chiamata vocale in parallelo.
 - **Dispositivi:** soprattutto computer; il tavolo deve restare utilizzabile anche da telefono o tablet.
 - **Competenze dei giocatori:** utenti comuni, non tecnici. Ogni passaggio di accesso deve essere ovvio.
@@ -56,10 +56,15 @@ Tutti di 5° livello. Le schede sono file Excel nella cartella `d&d_internationa
 
 | Termine | Significato nel progetto |
 | --- | --- |
-| **Tavolo** | La pagina condivisa in cui si gioca una sessione. |
-| **Master** | Chi conduce il gioco. Nel prototipo coincide con il **proprietario** del tavolo. |
-| **Giocatore** | Partecipante che controlla un personaggio. |
-| **Osservatore** | Chi ha accesso al tavolo ma non può modificarlo (sola lettura). |
+| **Utente** | Persona registrata sull'applicazione (email, password, nome visualizzato) con un ruolo applicativo: `ROLE_MASTER` o `ROLE_PLAYER`. |
+| **ROLE_MASTER** | Ruolo applicativo di chi può **creare e condurre partite**. |
+| **ROLE_PLAYER** | Ruolo applicativo di chi può **partecipare alle partite** su invito. |
+| **Partita** | Un'istanza di gioco indipendente: ha un Master, dei partecipanti, un'avventura corrente e il proprio stato (nebbia, pedine, mostri, narrazione, tiri). |
+| **Partecipazione** | Legame tra un utente e una partita, con il ruolo nella partita (giocatore o osservatore) e l'eventuale personaggio assegnato. |
+| **Tavolo** | La pagina condivisa in cui si gioca una sessione di una partita. |
+| **Master** | Chi conduce una partita: l'utente `ROLE_MASTER` che l'ha creata. |
+| **Giocatore** | Partecipante che controlla un personaggio in una partita. |
+| **Osservatore** | Partecipante di una partita in sola lettura. |
 | **PG** | Personaggio giocante. |
 | **Avventura** | Un insieme di mappa, zone, mostri e testi preparati per una o più sessioni. |
 | **Mappa del Master** | Versione completa della mappa: porte segrete ("S"), numeri delle stanze, trappole. Non va mai mostrata ai giocatori. |
@@ -75,6 +80,26 @@ Tutti di 5° livello. Le schede sono file Excel nella cartella `d&d_internationa
 
 ## 4. Ruoli e permessi
 
+### 4.1 Ruoli applicativi
+
+Ogni utente registrato ha **uno** ruolo applicativo, salvato nel database:
+
+| Azione applicativa | ROLE_MASTER | ROLE_PLAYER |
+| --- | :---: | :---: |
+| Registrarsi, accedere, gestire il proprio profilo | ✔ | ✔ |
+| Vedere l'elenco delle **proprie** partite | ✔ | ✔ |
+| Creare una nuova partita (diventandone il Master) | ✔ | ✘ |
+| Amministrare gli utenti: vedere l'elenco, promuovere un `ROLE_PLAYER` a `ROLE_MASTER`, disattivare un account | ✔ | ✘ |
+| Invitare utenti in una propria partita, assegnare i PG, togliere partecipanti | ✔ (solo nelle proprie) | ✘ |
+| Archiviare / eliminare una propria partita | ✔ | ✘ |
+| Partecipare a una partita su invito | ✔ | ✔ |
+
+- **Molti-a-molti:** N giocatori distinti possono giocare N partite distinte. Ogni partita ha **un solo** Master e da 0 a N partecipanti; ogni utente può partecipare a qualsiasi numero di partite.
+- Un utente `ROLE_MASTER` può partecipare come giocatore alle partite di un altro Master; il ruolo di **Master di una partita** deriva solo dall'esserne il creatore (`partita.master_id`), non dal ruolo applicativo.
+- **Isolamento:** ogni dato di gioco appartiene a una partita. Il server verifica a ogni richiesta e a ogni messaggio in tempo reale che l'utente partecipi a quella partita; chi non partecipa non ne vede nemmeno l'esistenza.
+
+### 4.2 Ruoli all'interno di una partita
+
 | Azione | Master | Giocatore | Osservatore |
 | --- | :---: | :---: | :---: |
 | Vedere la mappa scoperta, le pedine, lo storico tiri | ✔ | ✔ | ✔ |
@@ -88,10 +113,10 @@ Tutti di 5° livello. Le schede sono file Excel nella cartella `d&d_internationa
 | Pubblicare / nascondere il testo da leggere | ✔ | ✘ | ✘ |
 | Riportare le pedine all'ingresso | ✔ | ✘ | ✘ |
 | Svuotare lo storico tiri | ✔ | ✘ | ✘ |
-| Chiedere a Claude (risposta privata) | ✔ | ✔ | ✔ (se ha un account) |
+| Chiedere a Claude (risposta privata) | ✔ | ✔ | ✔ |
 
 Regole:
-- Il **Master** è un ruolo esplicito, non una conseguenza dei permessi di modifica. *(Lezione del prototipo: usare "chi può modificare" come criterio dava il pannello del Master anche ai giocatori invitati come Editor.)*
+- Il **Master** di una partita è l'utente `ROLE_MASTER` che l'ha creata (`partite.master_id`): un ruolo esplicito, mai dedotto da altri permessi.
 - I permessi vanno **imposti dal server**, non solo nascosti nell'interfaccia: un giocatore non deve poter scoprire la nebbia neanche manipolando la pagina.
 - Nell'MVP un giocatore può muovere **qualsiasi** pedina PG (comodo se qualcuno è assente). Valutare in seguito il vincolo "solo la propria".
 
@@ -103,10 +128,13 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 
 ### 5.1 Accesso e identità
 
-- **RF-01 Accesso con account.** Ogni partecipante entra con un'identità riconosciuta (nome visualizzato, eventuale avatar). Senza identità non si può scrivere sul tavolo.
-- **RF-02 Invito.** Il Master invita i giocatori; deve essere chiaro e semplice. *(Lezione del prototipo: la condivisione tramite link pubblico rendeva i giocatori di sola lettura senza che se ne accorgessero; l'invito andava fatto per email con un ruolo preciso. L'MVP deve rendere impossibile questo equivoco o segnalarlo in modo evidente.)*
-- **RF-03 Scelta del personaggio.** Ogni partecipante sceglie da un elenco "Giochi come: <PG> / Master". La scelta etichetta i suoi tiri ed evidenzia la sua pedina. Viene ricordata sul suo dispositivo.
-- **RF-04 Avviso di sola lettura.** Chi non può scrivere vede un avviso ben visibile (in rosso) che spiega perché e cosa fare. Lo stesso se non ha effettuato l'accesso.
+- **RF-01 Registrazione e accesso.** L'applicazione gestisce i propri utenti: registrazione con email, password e nome visualizzato (avatar facoltativo), accesso, uscita, recupero password. Ogni utente ha il ruolo applicativo `ROLE_MASTER` o `ROLE_PLAYER` (§4.1). Le password sono salvate solo come hash (argon2id). Senza accesso non si vede nessuna partita.
+- **RF-01b Assegnazione del ruolo.** Chi si registra diventa `ROLE_PLAYER`. L'amministrazione degli utenti spetta agli utenti `ROLE_MASTER`, che da un pannello possono promuovere un `ROLE_PLAYER` a `ROLE_MASTER`. Non esiste un amministratore predefinito né un utente con nome fisso: il **primo** `ROLE_MASTER` si crea all'installazione con un comando (es. `npm run utente:crea-master -- email`). Il sistema impedisce di rimuovere o declassare l'ultimo `ROLE_MASTER`.
+- **RF-02 Invito.** Il Master invita gli utenti nella propria partita indicando **esplicitamente** il ruolo nella partita (giocatore / osservatore) e, facoltativamente, il PG. L'invito avviene per email o con link personale monouso legato all'email; se l'invitato non è registrato, il link porta alla registrazione e poi direttamente nella partita. Non esistono link pubblici: ogni accesso a una partita passa da una partecipazione con un ruolo preciso, visibile al Master nell'elenco dei partecipanti.
+- **RF-03 Scelta del personaggio.** Ogni partecipante sceglie da un elenco "Giochi come: <PG>" (il Master è automaticamente "Master"). Se il Master ha assegnato un PG all'utente, è preselezionato. La scelta etichetta i suoi tiri ed evidenzia la sua pedina, ed è salvata nella partecipazione (vale su tutti i suoi dispositivi).
+- **RF-04 Avviso di sola lettura.** Chi non può scrivere vede un avviso ben visibile (in rosso) che spiega perché e cosa fare. Se la sessione è scaduta, l'utente torna alla pagina di accesso e poi alla partita.
+- **RF-05 Più partite.** Dopo l'accesso l'utente vede "Le mie partite": quelle che conduce (se `ROLE_MASTER`) e quelle a cui partecipa, con titolo, Master, avventura corrente e chi è collegato. Un `ROLE_MASTER` crea una nuova partita scegliendo titolo e avventura; lo stato iniziale segue RF-23 e RF-34. Ogni partita ha un indirizzo proprio (es. `/partite/42`).
+- **RF-06 Isolamento tra partite.** Nebbia, pedine, mostri, narrazione, tiri e presenza sono separati per partita. Un messaggio in tempo reale di una partita arriva solo ai collegati di quella partita; nessuna richiesta può leggere o modificare una partita a cui l'utente non partecipa (verifica lato server).
 
 ### 5.2 Mappa
 
@@ -161,45 +189,51 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 
 ### 5.9 Presenza
 
-- **RF-80** Riquadro "Al tavolo": chi ha la pagina aperta in questo momento, con avatar, nome, personaggio scelto ed etichetta di stato: **Master**, **gioca**, **sola lettura**.
+- **RF-80** Riquadro "Al tavolo": chi ha aperta in questo momento la pagina **di questa partita**, con avatar, nome, personaggio scelto ed etichetta di stato: **Master**, **gioca**, **sola lettura**.
 - **RF-81** Si aggiorna all'istante quando qualcuno entra, esce o cambia personaggio. Più schede della stessa persona contano una volta.
 
 ### 5.10 Sincronizzazione e affidabilità
 
 - **RF-90 Tempo reale.** Ogni modifica (nebbia, pedine, mostri, testo, tiri) arriva a tutti entro **3 secondi**, idealmente all'istante.
-- **RF-91 Ripiego.** Se l'aggiornamento in diretta si interrompe, la pagina ricontrolla lo stato a intervalli regolari e si riallinea da sola. *(Lezione del prototipo: senza questo ripiego gli aggiornamenti potevano arrivare dopo ~30 secondi.)*
-- **RF-92 Stato del collegamento.** Riga sotto la mappa: account collegato / non collegato, permessi (può giocare / sola lettura), ora dell'ultimo aggiornamento, eventuali errori. Pulsante "Aggiorna ora".
-- **RF-93 Persistenza.** Lo stato del tavolo sopravvive alla chiusura delle pagine e tra una sessione e l'altra.
+- **RF-91 Ripiego.** Se l'aggiornamento in diretta si interrompe, la pagina ricontrolla lo stato a intervalli regolari e si riallinea da sola.
+- **RF-92 Stato del collegamento.** Riga sotto la mappa: collegato / non collegato al server, permessi (può giocare / sola lettura), ora dell'ultimo aggiornamento, eventuali errori. Pulsante "Aggiorna ora".
+- **RF-93 Persistenza.** Lo stato di ogni partita è salvato in MySQL e sopravvive alla chiusura delle pagine e tra una sessione e l'altra.
 - **RF-94 Trascinamenti concorrenti.** Mentre un utente trascina una pedina, gli aggiornamenti in arrivo non devono farla "saltare"; dopo il rilascio vince la posizione salvata.
-- **RF-95 Backup.** Il Master può esportare lo stato del tavolo (nebbia, pedine, mostri, testo, tiri) in un file. *(Nel prototipo: `backup_database.json`, fatto a mano.)*
+- **RF-95 Backup.** Il Master può esportare lo stato di una propria partita (nebbia, pedine, mostri, testo, tiri) in un file JSON. Il backup completo è quello del database MySQL.
 
 ### 5.11 Chiedi a Claude
 
 - **RF-100** Riquadro "Chiedi a Claude": il partecipante scrive una domanda sulle regole e riceve una risposta breve (massimo 8 righe), in italiano, mostrata mentre viene scritta, con pulsante "Ferma".
 - **RF-101** Le risposte si basano sulla conoscenza generale di Claude del regolamento BECMI (Base/Expert) e di Mystara. **Non** cercano su internet e **non** leggono i manuali del gruppo. *(Decisione presa: la variante "solo dai manuali", con testo estratto via OCR dai PDF, è stata provata e scartata dal Master. Il testo estratto resta in `regole.json` se si volesse riprenderla.)*
 - **RF-102** Claude non rivela segreti dell'avventura: alle domande su cosa c'è nel dungeon risponde che lo decide il Master.
-- **RF-103** La risposta è visibile solo a chi ha chiesto e usa il suo account Claude.
+- **RF-103** La risposta è visibile solo a chi ha chiesto. Con l'app autonoma la domanda passa dal server, che chiama l'API di Anthropic con una chiave del server (mai esposta al browser) e applica un limite di domande per utente. *(Costi: vedi §13.)*
 - **RF-104** Avvertenza implicita: su valori precisi (tabelle, tiri salvezza) le risposte vanno verificate sul manuale.
 
 ---
 
 ## 6. Modello dei dati (descrittivo)
 
-Entità e informazioni minime. I nomi tra parentesi sono quelli usati nel prototipo, utili come riferimento.
+Entità e informazioni minime. Lo schema MySQL è in §15.4.
 
-- **Avventura**: titolo, sottotitolo (es. "Emirato di Nithia · sessione 0"), mappa, elenco zone, sovrapposizioni segrete, posizioni iniziali dei PG, tipi di mostro disponibili.
-- **Mappa**: immagine per i giocatori, dimensioni in pixel (prototipo: 1480 × 1080), scala (40 px = 1 quadretto = 3 m). La mappa del Master è un file separato, mai caricato sul tavolo.
+- **Utente**: id, email (unica), hash della password, nome visualizzato, avatar, ruolo applicativo (`ROLE_MASTER` | `ROLE_PLAYER`), data di registrazione.
+- **Partita**: id, titolo, Master (utente), avventura corrente, stato (attiva / archiviata), date di creazione e aggiornamento.
+- **Partecipazione**: partita, utente, ruolo nella partita (giocatore / osservatore), PG scelto o assegnato. Unica per coppia (partita, utente).
+- **Invito**: partita, email, ruolo proposto, token monouso (salvato come hash), scadenza, data di accettazione.
+- **Avventura**: modello riutilizzabile, indipendente dalle partite (più partite possono usare la stessa avventura): titolo, sottotitolo (es. "Emirato di Nithia · sessione 0"), mappa, elenco zone, sovrapposizioni segrete, posizioni iniziali dei PG, tipi di mostro disponibili.
+- **Mappa**: immagine per i giocatori, dimensioni in pixel (Sessione 0: 1480 × 1080), scala (40 px = 1 quadretto = 3 m). La mappa del Master è un file separato, mai caricato sul tavolo.
 - **Zona**: id, nome, poligono (percorso SVG in coordinate mappa).
 - **Sovrapposizione segreta**: immagine, rettangolo di posizionamento, zona che la attiva.
-- **Stato nebbia** (`gm/fog`): elenco degli id delle zone scoperte.
-- **Pedine PG** (`tokens/all`): per ogni PG, coordinate x, y.
-- **Mostri** (`gm/monsters`): elenco di { id, nome, sigla, x, y }.
-- **Narrazione** (`gm/narr`): testo, data di pubblicazione.
-- **Tiro** (`rolls`): id utente, personaggio, motivo, numero dadi, facce, modificatore, risultati, totale, data/ora.
-- **Tiro nascosto**: come un tiro, salvato in uno spazio privato del Master.
+- **Stato nebbia**: elenco degli id delle zone scoperte.
+- **Pedine PG**: per ogni PG, coordinate x, y.
+- **Mostri**: elenco di { id, nome, sigla, x, y }.
+- **Narrazione**: testo, data di pubblicazione.
+- **Tiro**: id utente, personaggio, motivo, numero dadi, facce, modificatore, risultati, totale, data/ora.
+- **Tiro nascosto**: come un tiro, con il contrassegno `nascosto`; il server lo invia solo al Master.
 - **Presenza**: effimera, non salvata: utente, personaggio scelto, ruolo, può scrivere.
 
-Nel prototipo i dati del Master (`gm/*`) sono leggibili da tutti e scrivibili solo dal proprietario. Per l'MVP: i dati che sono spoiler (mostri in zone coperte, zone non scoperte, futuri appunti del Master) devono restare lato server o essere filtrati prima di arrivare ai giocatori.
+Tutto lo stato di gioco (nebbia, pedine, mostri, narrazione, tiri, PG) è **legato a una partita** (`partita_id`).
+
+I dati che sono spoiler (mostri in zone coperte, zone non scoperte, tiri nascosti, futuri appunti del Master) restano sul server e vengono filtrati prima di arrivare ai giocatori (§15.3).
 
 ---
 
@@ -207,7 +241,7 @@ Nel prototipo i dati del Master (`gm/*`) sono leggibili da tutti e scrivibili so
 
 - **RNF-01 Nessuna installazione** per i giocatori: si gioca da browser.
 - **RNF-02 Responsive:** utilizzabile fino a ~400 px di larghezza; su schermi stretti le colonne si impilano; nessuno scorrimento orizzontale della pagina.
-- **RNF-03 Tema chiaro e scuro** che segue le impostazioni del dispositivo. Palette del prototipo: sabbia del deserto, papiro, lapislazzuli nithiano (accento), corniola (errori, 1 naturale). Caratteri: Marcellus SC (titoli), Alegreya Sans (testo), JetBrains Mono (dadi e numeri).
+- **RNF-03 Tema chiaro e scuro** che segue le impostazioni del dispositivo. Palette: sabbia del deserto, papiro, lapislazzuli nithiano (accento), corniola (errori, 1 naturale). Caratteri: Marcellus SC (titoli), Alegreya Sans (testo), JetBrains Mono (dadi e numeri).
 - **RNF-04 Accessibilità:** focus visibile da tastiera, contrasti adeguati, rispetto di "riduci movimento", testi alternativi per la mappa.
 - **RNF-05 Privacy:** il tavolo non è pubblico; accede solo chi è invitato.
 - **RNF-06 Sicurezza dei contenuti:** ogni testo inserito dagli utenti (motivi dei tiri, nomi dei mostri, narrazione) viene mostrato come testo, mai interpretato come HTML.
@@ -233,14 +267,11 @@ Requisito per l'MVP: questo flusso deve essere ripetibile e documentato. Il cari
 
 ---
 
-## 9. Lezioni apprese dal prototipo
+## 9. Lezioni di gioco apprese dal prototipo
 
 | Problema riscontrato | Causa | Requisito che ne deriva |
 | --- | --- | --- |
-| I giocatori tiravano ma il Master non vedeva nulla | Pagina condivisa con link pubblico → giocatori in sola lettura senza saperlo | RF-02, RF-04, RF-80 |
-| Gli amici invitati come Editor vedevano il pannello del Master | Ruolo Master dedotto dai permessi di modifica | Ruolo Master esplicito (§4) |
 | Le pedine dei mostri non si potevano spostare | La nebbia intercettava i clic | RF-25 |
-| Aggiornamenti lenti o assenti | Solo aggiornamento in diretta, senza ripiego | RF-90, RF-91, RF-92 |
 | Pedina che "salta" durante il trascinamento | Aggiornamenti in arrivo durante il drag | RF-94 |
 | Pedine troppo piccole su mappe grandi | Dimensione fissa | Dimensione leggibile, eventualmente zoom |
 | I file della mappa segreta erano raggiungibili conoscendo l'indirizzo | Sovrapposizione pubblicata come file statico | La sovrapposizione deve arrivare solo a zona scoperta |
@@ -270,15 +301,14 @@ Esplicitamente **non** previsti: audio/video integrati, mercato di contenuti, au
 
 ## 11. Risorse esistenti
 
-Cartella del progetto: `C:\Users\Marco\Dropbox\d&d_online`
+Materiale del gruppo, esterno a questo repository. Va usato come fonte di contenuti (mappe, zone, regole, PG), non come vincolo tecnico.
 
 | Percorso | Contenuto |
 | --- | --- |
-| `tavolo_sorgenti/tavolo_template.html` | Prototipo completo del tavolo (riferimento funzionale) |
+| `tavolo_sorgenti/tavolo_template.html` | Prototipo del tavolo (solo riferimento funzionale e grafico) |
 | `tavolo_sorgenti/meta.json` | Zone, sovrapposizione e posizioni iniziali della Sessione 0 |
 | `tavolo_sorgenti/genera_mappa.py` | Generatore della mappa (versioni master / giocatori / passaggio) |
 | `tavolo_sorgenti/mappa_giocatori.png`, `passaggio.png` | Immagini usate dal tavolo |
-| `tavolo_sorgenti/backup_database.json` | Esempio reale dello stato del tavolo |
 | `tavolo_sorgenti/regole.json` | Testo dei manuali BECMI estratto via OCR (variante scartata) |
 | `santuario_zebulon_dungeon/` | Avventura Sessione 0: documento, mappa del Master, legenda dei simboli |
 | `regole/` | Manuali BECMI in PDF (scansioni) e Schermo del Master |
@@ -291,6 +321,11 @@ Cartella del progetto: `C:\Users\Marco\Dropbox\d&d_online`
 
 L'MVP è pronto quando, in una prova con il Master e almeno due giocatori su dispositivi diversi:
 
+- [ ] un nuovo utente si registra, accede ed esce; chi si registra è `ROLE_PLAYER`;
+- [ ] un `ROLE_MASTER` crea due partite distinte e invita giocatori diversi (con almeno un giocatore in comune);
+- [ ] il giocatore in comune vede entrambe le partite in "Le mie partite"; un giocatore non invitato non ne vede nessuna, nemmeno conoscendone l'indirizzo;
+- [ ] uno spostamento, un tiro o una zona scoperta in una partita non compare nell'altra;
+- [ ] un `ROLE_PLAYER` non riesce a creare partite né a eseguire azioni da Master, neanche inviando messaggi costruiti a mano al server;
 - [ ] ogni giocatore entra dall'invito e compare in "Al tavolo" con l'etichetta **gioca**;
 - [ ] un giocatore che non ha i permessi vede l'avviso di sola lettura;
 - [ ] il Master scopre una zona e tutti la vedono entro 3 secondi;
@@ -307,13 +342,11 @@ L'MVP è pronto quando, in una prova con il Master e almeno due giocatori su dis
 
 ## 13. Domande aperte
 
-- **Stack tecnico** (frontend, backend, database in tempo reale, autenticazione, hosting): *da decidere*.
-- Restare sulla piattaforma degli artifact di claude.ai o diventare un'applicazione autonoma?
-- Come autenticare giocatori senza account Claude?
-- Più tavoli/avventure per lo stesso Master: un tavolo per avventura o un tavolo con più avventure?
+- Una partita cambia avventura nel tempo (campagna: sessione 0, X4, X5…) conservando i PG? Proposta: sì, la partita ha un'avventura corrente; cambiandola si azzerano nebbia e mostri, non i PG né lo storico.
+- I PG appartengono alla partita (proposta) o all'utente e si portano da una partita all'altra?
 - Un giocatore può muovere solo la propria pedina?
 - Quanto storico tiri conservare (sessione, campagna)?
-- "Chiedi a Claude" deve restare nell'MVP se l'app diventa autonoma (costi API)?
+- "Chiedi a Claude" deve restare nell'MVP, visti i costi dell'API? In alternativa diventa una funzione attivabile per partita.
 
 ---
 
@@ -321,7 +354,82 @@ L'MVP è pronto quando, in una prova con il Master e almeno due giocatori su dis
 
 - Scrivi interfaccia, testi e commenti rivolti all'utente in **italiano**; usa la terminologia BECMI italiana.
 - Tratta i **segreti dell'avventura** (mappa del Master, zone non scoperte, mostri nascosti) come dati sensibili: mai inviarli al client di un giocatore.
-- Ogni controllo di permesso va fatto anche lato server.
+- Ogni controllo di permesso va fatto anche lato server: ruolo applicativo (`ROLE_MASTER`/`ROLE_PLAYER`), partecipazione alla partita e ruolo nella partita. Ogni query sui dati di gioco filtra per `partita_id`.
+- Rispetta lo stack di §15; per introdurre una nuova dipendenza importante, chiedi prima.
 - Mantieni coordinate e dati delle avventure **separati dal codice** (file di descrizione dell'avventura), così una nuova avventura non richiede di modificare il codice.
-- Prima di cambiare il comportamento di una funzione del prototipo, controlla la sezione 9: molti dettagli rispondono a problemi già incontrati.
+- Il prototipo è solo un riferimento funzionale: non replicarne piattaforma, accesso o salvataggio dei dati. Prima di cambiare un comportamento di gioco, controlla la sezione 9.
+- Nessun utente ha privilegi per nome: i privilegi derivano solo da `ROLE_MASTER` / `ROLE_PLAYER` e dalla partecipazione alle partite.
 - Quando un requisito è ambiguo, chiedi invece di supporre: questo documento è una raccolta requisiti in evoluzione.
+
+---
+
+## 15. Stack tecnico
+
+Vincolo: **MySQL 9.7** come unico database relazionale. Indicazioni di partenza: Svelte per il frontend, Node.js con WebSocket per il backend. Tutto il codice è in **TypeScript**.
+
+### 15.1 Scelte
+
+| Livello | Scelta | Perché |
+| --- | --- | --- |
+| Runtime | **Node.js 24 LTS** | Versione LTS corrente; `crypto.randomInt` per dadi sicuri e senza distorsioni (RF-52). |
+| Frontend | **Svelte 5 + SvelteKit 2** in modalità SPA (`adapter-static`), **Vite** | Reattività con le *runes* adatta a uno stato che cambia in tempo reale; bundle piccolo, buono su telefono (RNF-02). SvelteKit dà routing (`/accedi`, `/partite`, `/partite/[id]`) senza introdurre un secondo server: nessuna logica lato server in SvelteKit, così i controlli di permesso stanno in un solo posto. |
+| Server HTTP | **Fastify 5** | Leggero, veloce, validazione degli schemi integrata; serve l'API REST, le immagini protette e i file statici della SPA. |
+| Tempo reale | **Socket.IO 4** (sopra WebSocket) | Rispetto a `ws` puro offre già: *rooms* (una per partita e una per i Master → isolamento RF-06 e filtro degli spoiler), riconnessione automatica, conferme (*ack*) dei comandi e ripiego su long-polling se il WebSocket è bloccato (RF-91). |
+| Accesso al DB | **Kysely** + driver **mysql2** | Query builder tipizzato: SQL esplicito e leggibile, transazioni, migrazioni versionate in TypeScript. Niente ORM pesante. |
+| Validazione | **Zod**, schemi condivisi tra client e server | Ogni comando in arrivo (REST o Socket.IO) è validato prima di toccare il DB. |
+| Password | **argon2id** (`@node-rs/argon2`) | Standard attuale per l'hashing. |
+| Sessioni | Cookie `httpOnly`, `Secure`, `SameSite=Lax` con token casuale; in DB solo l'hash del token | Revocabili (uscita, cambio password), lo stesso cookie autentica l'handshake di Socket.IO. Niente JWT. |
+| Email | **Nodemailer** via SMTP (inviti, recupero password); in sviluppo **Mailpit** | |
+| Test | **Vitest** (unità e integrazione, con MySQL reale di test), **Playwright** (end-to-end con più browser contemporanei per i criteri di §12) | |
+| Qualità | ESLint + Prettier (con plugin Svelte), `svelte-check`, `tsc --noEmit` | |
+| Monorepo | **npm workspaces** | Nessuno strumento in più. |
+| Hosting | Una VPS piccola: Node (systemd) + MySQL 9.7 + **Caddy** (HTTPS automatico) | Pochi euro al mese per molti gruppi (RNF-07). |
+
+Scartati: `ws` puro (andrebbero riscritti rooms, riconnessione e ripiego); NestJS (troppo apparato per il progetto); Prisma (più pesante, SQL meno controllabile); Firebase/Supabase (esclusi dal vincolo MySQL); SSR di SvelteKit (doppio server e doppi controlli di permesso senza un vero vantaggio per un'app dietro accesso).
+
+### 15.2 Struttura del repository
+
+```
+apps/
+  server/      Fastify + Socket.IO + Kysely (API, tempo reale, migrazioni)
+  web/         SvelteKit SPA
+packages/
+  shared/      schemi Zod, tipi dei messaggi, costanti di gioco (dadi, sigle)
+avventure/
+  sessione-0/  meta.json (zone, sovrapposizioni, posizioni, tipi di mostro) + immagini
+```
+
+Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il server dopo aver verificato la partecipazione, e una sovrapposizione segreta solo se la sua zona è scoperta (§9, ultima riga).
+
+### 15.3 Architettura del tempo reale
+
+- **Il server è l'unica autorità.** Il client invia *comandi* (`zona:scopri`, `pedina:sposta`, `mostro:aggiungi`, `dadi:tira`, `narrazione:pubblica`…); il server valida (Zod), controlla i permessi (ruolo applicativo, partecipazione, ruolo nella partita), scrive su MySQL in una transazione e diffonde un *evento*. I dadi si tirano **sul server** (RF-52, RF-63).
+- **Rooms:** `partita:{id}` per tutti i collegati di una partita, `partita:{id}:master` per il Master. Gli eventi con spoiler (mostri in zone coperte, tiri nascosti, poligoni delle zone non scoperte) vanno solo alla room del Master; quando una zona viene scoperta, i giocatori ricevono in quel momento i mostri e la sovrapposizione che contiene (RF-44).
+- **Viste filtrate:** una funzione `vistaGiocatore(stato)` e una `vistaMaster(stato)` costruiscono lo stato completo per ruolo; ogni istantanea (all'ingresso, alla riconnessione, su "Aggiorna ora") passa da lì.
+- **Versione:** ogni partita ha un contatore `versione` incrementato a ogni modifica; gli eventi lo portano con sé. Se il client nota un salto, chiede l'istantanea completa. Alla riconnessione chiede sempre l'istantanea (RF-91).
+- **Trascinamento (RF-94):** la posizione si salva al rilascio; durante il drag il client ignora gli aggiornamenti di quella pedina.
+- **Presenza (RF-80/81):** in memoria nel processo Node, per partita e per utente (più schede contano una volta); non salvata su DB.
+- Un solo processo Node basta per l'uso previsto; per scalare su più processi si aggiungerà l'adapter Redis di Socket.IO.
+
+### 15.4 Schema MySQL (bozza)
+
+Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di tabelle e colonne in italiano.
+
+| Tabella | Colonne principali |
+| --- | --- |
+| `utenti` | `id`, `email` (unica), `password_hash`, `nome`, `avatar_url`, `ruolo` ENUM(`ROLE_MASTER`,`ROLE_PLAYER`), `attivo`, `creato_il` |
+| `sessioni` | `token_hash` (PK), `utente_id`, `scade_il`, `creato_il` |
+| `avventure` | `id`, `slug` (unico), `titolo`, `sottotitolo`, `definizione` JSON (dimensioni mappa, zone, sovrapposizioni, posizioni iniziali, tipi di mostro), `cartella` |
+| `partite` | `id`, `titolo`, `master_id` → utenti, `avventura_id` → avventure, `stato` ENUM(`attiva`,`archiviata`), `versione`, `narrazione_testo`, `narrazione_pubblicata_il`, `creata_il`, `aggiornata_il` |
+| `partecipazioni` | PK(`partita_id`, `utente_id`), `ruolo` ENUM(`giocatore`,`osservatore`), `personaggio_id` (scelto), `creata_il` |
+| `inviti` | `id`, `partita_id`, `email`, `ruolo`, `personaggio_id`, `token_hash`, `scade_il`, `accettato_il` |
+| `personaggi` | `id`, `partita_id`, `nome`, `classe`, `sigla`, `colore`, `utente_id` (giocatore assegnato, facoltativo), `x`, `y` |
+| `zone_scoperte` | PK(`partita_id`, `zona_id`) |
+| `mostri` | `id`, `partita_id`, `nome`, `sigla`, `x`, `y` |
+| `tiri` | `id`, `partita_id`, `utente_id`, `personaggio_id`, `motivo`, `n_dadi`, `facce`, `modificatore`, `risultati` JSON, `totale`, `nascosto`, `creato_il`; indice (`partita_id`, `creato_il`) |
+
+Ogni query sui dati di gioco filtra per `partita_id`, e l'accesso alla partita è verificato prima (`partecipazioni` oppure `partite.master_id`).
+
+### 15.5 Comandi
+
+*Da definire con l'impalcatura del progetto* (sviluppo, test, migrazioni, `utente:crea-master` per il primo Master, importazione di un'avventura da `avventure/<slug>/meta.json`).
