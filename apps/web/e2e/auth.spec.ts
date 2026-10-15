@@ -17,7 +17,8 @@ test('registrazione, uscita e nuovo accesso', async ({ page }) => {
   await page.getByRole('button', { name: 'Registrati' }).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole('heading', { name: 'Ciao Irene' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Le mie partite' })).toBeVisible();
+  await expect(page.getByRole('banner')).toContainText('Irene');
   await expect(page.getByText('Giocatore', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Esci' }).click();
@@ -30,7 +31,7 @@ test('registrazione, uscita e nuovo accesso', async ({ page }) => {
 
   await page.getByLabel('Password').fill('una-password-lunga');
   await page.getByRole('button', { name: 'Accedi' }).click();
-  await expect(page.getByRole('heading', { name: 'Ciao Irene' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Le mie partite' })).toBeVisible();
 });
 
 test('dopo l’accesso si torna alla pagina richiesta', async ({ page, request }) => {

@@ -9,7 +9,7 @@
   import { StatoModulo } from '#lib/modulo.svelte.ts';
   import { destinazioneSicura } from '#lib/navigazione.ts';
 
-  let email = $state('');
+  let email = $state(page.url.searchParams.get('email') ?? '');
   let password = $state('');
   const modulo = new StatoModulo();
 
@@ -64,4 +64,8 @@
 </form>
 
 <p class="link"><a href={resolve('password-dimenticata')}>Hai dimenticato la password?</a></p>
-<p class="link">Non hai un account? <a href={resolve('registrati')}>Registrati</a></p>
+<p class="link">
+  Non hai un account?
+  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- stessi parametri di questa pagina -->
+  <a href="{resolve('registrati')}{page.url.search}">Registrati</a>
+</p>

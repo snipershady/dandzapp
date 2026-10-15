@@ -36,6 +36,14 @@ export async function promuoviMaster(email: string): Promise<void> {
   }
 }
 
+/** Registra un Master e restituisce la sua email. */
+export async function nuovoMaster(request: APIRequestContext, nome = 'Marco'): Promise<string> {
+  const email = emailUnica('master');
+  await registra(request, { email, nome });
+  await promuoviMaster(email);
+  return email;
+}
+
 export async function accedi(page: Page, email: string): Promise<void> {
   await page.goto('/accedi');
   await page.getByLabel('Email').fill(email);

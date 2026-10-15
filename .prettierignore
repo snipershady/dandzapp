@@ -6,3 +6,6 @@ playwright-report/
 test-results/
 CLAUDE.md
 LICENSE
+strumenti/mappe/.venv/
+# Le descrizioni dei dungeon distinguono 18 da 18.0: non vanno riformattate.
+avventure/

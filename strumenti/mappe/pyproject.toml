@@ -1,0 +1,12 @@
+[project]
+name = "dandzapp-mappe"
+version = "0.1.0"
+description = "Generatore di mappe in stile Dyson Logos per il Tavolo virtuale"
+requires-python = ">=3.12"
+dependencies = [
+  "shapely>=2.0",
+  "cairosvg>=2.7",
+]
+
+[dependency-groups]
+dev = ["pillow>=11"]

@@ -21,7 +21,16 @@ export type Contesto = {
   chiudi(): Promise<void>;
 };
 
-const TABELLE = ['recuperi_password', 'sessioni', 'utenti'] as const;
+const TABELLE = [
+  'inviti',
+  'partecipazioni',
+  'personaggi',
+  'partite',
+  'avventure',
+  'recuperi_password',
+  'sessioni',
+  'utenti',
+] as const;
 
 /** App con database di test vuoto, posta finta e orologio controllabile. */
 export async function creaContesto(): Promise<Contesto> {

@@ -1,14 +1,16 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { PASSWORD_MIN, RispostaUtente } from '@dandzapp/shared';
   import { api } from '#lib/api.ts';
   import Avviso from '#lib/componenti/Avviso.svelte';
   import Campo from '#lib/componenti/Campo.svelte';
   import { StatoModulo } from '#lib/modulo.svelte.ts';
+  import { destinazioneSicura } from '#lib/navigazione.ts';
 
   let nome = $state('');
-  let email = $state('');
+  let email = $state(page.url.searchParams.get('email') ?? '');
   let password = $state('');
   const modulo = new StatoModulo();
 
@@ -22,7 +24,12 @@
       }),
     );
     if (ok) {
-      await goto(resolve(''), { replaceState: true, invalidateAll: true });
+      // Percorso già validato da destinazioneSicura (es. ritorno al link d'invito).
+      // eslint-disable-next-line svelte/no-navigation-without-resolve
+      await goto(destinazioneSicura(page.url.searchParams.get('dopo')), {
+        replaceState: true,
+        invalidateAll: true,
+      });
     }
   }
 </script>
@@ -69,4 +76,8 @@
   </button>
 </form>
 
-<p class="link">Hai già un account? <a href={resolve('accedi')}>Accedi</a></p>
+<p class="link">
+  Hai già un account?
+  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- stessi parametri di questa pagina -->
+  <a href="{resolve('accedi')}{page.url.search}">Accedi</a>
+</p>

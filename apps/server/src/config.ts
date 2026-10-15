@@ -15,6 +15,7 @@ const SchemaConfig = z.object({
   DB_PASSWORD: z.string(),
   DB_NAME: z.string().min(1),
   WEB_BUILD_DIR: z.string().default(''),
+  DATA_DIR: z.string().default(''),
   LIMITE_TENTATIVI: z.stringbool().default(true),
   APP_URL: z.url().default('http://localhost:5173'),
   SMTP_HOST: z.string().default(''),
@@ -40,6 +41,8 @@ export type Config = {
   limiteTentativi: boolean;
   /** Cartella della build della SPA; `null` se non esiste (es. in sviluppo con Vite). */
   cartellaWeb: string | null;
+  /** File caricati sul server (immagini delle avventure): fuori dalla cartella pubblica. */
+  cartellaDati: string;
 };
 
 /**
@@ -81,6 +84,7 @@ export function caricaConfig(env: NodeJS.ProcessEnv = process.env): Config {
       : null,
     mittente: c.EMAIL_MITTENTE,
     limiteTentativi: c.LIMITE_TENTATIVI,
+    cartellaDati: c.DATA_DIR || `${radiceRepository}dati`,
     cartellaWeb: existsSync(`${cartellaWeb}/index.html`) ? cartellaWeb : null,
   };
 }

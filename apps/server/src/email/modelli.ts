@@ -29,3 +29,23 @@ ${link}
 `,
   };
 }
+
+export function emailInvito(
+  a: string,
+  dati: { master: string; partita: string; ruolo: string; link: string },
+): Email {
+  return {
+    a,
+    oggetto: `${dati.master} ti invita a "${dati.partita}"`,
+    testo: `Ciao,
+
+${dati.master} ti invita a partecipare alla partita "${dati.partita}" sul Tavolo virtuale,
+come ${dati.ruolo === 'giocatore' ? 'giocatore' : 'osservatore (sola lettura)'}.
+
+Apri questo link entro 7 giorni per unirti. Se non hai ancora un account, potrai
+crearlo con questa email (${a}):
+
+${dati.link}
+`,
+  };
+}

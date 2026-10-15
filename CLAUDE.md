@@ -133,7 +133,7 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 - **RF-02 Invito.** Il Master invita gli utenti nella propria partita indicando **esplicitamente** il ruolo nella partita (giocatore / osservatore) e, facoltativamente, il PG. L'invito avviene per email o con link personale monouso legato all'email; se l'invitato non è registrato, il link porta alla registrazione e poi direttamente nella partita. Non esistono link pubblici: ogni accesso a una partita passa da una partecipazione con un ruolo preciso, visibile al Master nell'elenco dei partecipanti.
 - **RF-03 Scelta del personaggio.** Ogni partecipante sceglie da un elenco "Giochi come: <PG>" (il Master è automaticamente "Master"). Se il Master ha assegnato un PG all'utente, è preselezionato. La scelta etichetta i suoi tiri ed evidenzia la sua pedina, ed è salvata nella partecipazione (vale su tutti i suoi dispositivi).
 - **RF-04 Avviso di sola lettura.** Chi non può scrivere vede un avviso ben visibile (in rosso) che spiega perché e cosa fare. Se la sessione è scaduta, l'utente torna alla pagina di accesso e poi alla partita.
-- **RF-05 Più partite.** Dopo l'accesso l'utente vede "Le mie partite": quelle che conduce (se `ROLE_MASTER`) e quelle a cui partecipa, con titolo, Master, avventura corrente e chi è collegato. Un `ROLE_MASTER` crea una nuova partita scegliendo titolo e avventura; lo stato iniziale segue RF-23 e RF-34. Ogni partita ha un indirizzo proprio (es. `/partite/42`).
+- **RF-05 Più partite.** Dopo l'accesso l'utente vede "Le mie partite": quelle che conduce (se `ROLE_MASTER`) e quelle a cui partecipa, con titolo, Master, avventura e chi è collegato. Un `ROLE_MASTER` crea una nuova partita scegliendo titolo e avventura: **una partita usa una sola avventura per tutta la sua durata** (per giocarne un'altra si crea una nuova partita); lo stato iniziale segue RF-23 e RF-34. Ogni partita ha un indirizzo proprio (es. `/partite/42`).
 - **RF-06 Isolamento tra partite.** Nebbia, pedine, mostri, narrazione, tiri e presenza sono separati per partita. Un messaggio in tempo reale di una partita arriva solo ai collegati di quella partita; nessuna richiesta può leggere o modificare una partita a cui l'utente non partecipa (verifica lato server).
 
 ### 5.2 Mappa
@@ -157,7 +157,7 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 - **RF-31** Le pedine si trascinano con mouse o dito; la nuova posizione arriva a tutti.
 - **RF-32** La pedina del personaggio scelto dall'utente è evidenziata (bordo dorato).
 - **RF-33** Le pedine stanno **sopra** la nebbia (i PG sono sempre visibili a tutti).
-- **RF-34** Il Master può riportare tutte le pedine alla posizione iniziale definita dall'avventura (es. in fondo alla scala d'ingresso).
+- **RF-34** Il Master può riportare tutte le pedine ai **posti di partenza** definiti dall'avventura (es. in fondo alla scala d'ingresso). L'avventura elenca posti numerati, non nomi di PG: il primo PG della partita va nel primo posto, il secondo nel secondo e così via.
 - **RF-35** Una legenda sotto la mappa associa colori e nomi.
 
 ### 5.5 Pedine dei mostri
@@ -216,10 +216,11 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 Entità e informazioni minime. Lo schema MySQL è in §15.4.
 
 - **Utente**: id, email (unica), hash della password, nome visualizzato, avatar, ruolo applicativo (`ROLE_MASTER` | `ROLE_PLAYER`), data di registrazione.
-- **Partita**: id, titolo, Master (utente), avventura corrente, stato (attiva / archiviata), date di creazione e aggiornamento.
+- **Partita**: id, titolo, Master (utente), avventura (fissata alla creazione, non cambia), stato (attiva / archiviata), date di creazione e aggiornamento.
+- **PG**: appartiene alla **partita** (non all'utente). Il Master lo crea e lo assegna a un giocatore; non si porta da una partita all'altra.
 - **Partecipazione**: partita, utente, ruolo nella partita (giocatore / osservatore), PG scelto o assegnato. Unica per coppia (partita, utente).
 - **Invito**: partita, email, ruolo proposto, token monouso (salvato come hash), scadenza, data di accettazione.
-- **Avventura**: modello riutilizzabile, indipendente dalle partite (più partite possono usare la stessa avventura): titolo, sottotitolo (es. "Emirato di Nithia · sessione 0"), mappa, elenco zone, sovrapposizioni segrete, posizioni iniziali dei PG, tipi di mostro disponibili.
+- **Avventura**: modello riutilizzabile, indipendente dalle partite (più partite possono usare la stessa avventura). È il file `avventura.json`, il cui formato è lo schema `DefinizioneAvventura` in `packages/shared/src/avventura.ts`: id, titolo, sottotitolo, mappa (immagine, dimensioni, quadretto), zone (id, nome, percorso, centro), zone iniziali, segreti (immagine e rettangolo, legati a una zona), posti di partenza, tipi di mostro (nome e sigla).
 - **Mappa**: immagine per i giocatori, dimensioni in pixel (Sessione 0: 1480 × 1080), scala (40 px = 1 quadretto = 3 m). La mappa del Master è un file separato, mai caricato sul tavolo.
 - **Zona**: id, nome, poligono (percorso SVG in coordinate mappa).
 - **Sovrapposizione segreta**: immagine, rettangolo di posizionamento, zona che la attiva.
@@ -253,17 +254,20 @@ I dati che sono spoiler (mostri in zone coperte, zone non scoperte, tiri nascost
 
 ## 8. Preparare una nuova avventura
 
-Oggi la preparazione si fa con l'aiuto di Claude, non dal tavolo. Flusso attuale:
+Flusso ripetibile, senza modificare codice (step 3 della §16):
 
-1. **Disegno della mappa** con `genera_mappa.py`, che produce tre versioni:
-   - `master`: mappa completa con "S" delle porte segrete e numeri delle stanze;
-   - `base`: mappa dei giocatori, senza passaggi segreti, "S" e numeri;
-   - `passage`: versione con il passaggio segreto, da cui si ritaglia la sovrapposizione.
-2. **Definizione delle zone** e delle posizioni iniziali in `meta.json` (dimensioni, poligoni, rettangolo della sovrapposizione, posizioni dei PG).
-3. **Montaggio della pagina** a partire da `tavolo_template.html`, sostituendo i segnaposto con i dati di `meta.json`.
-4. **Azzeramento dello stato** (nebbia, pedine, mostri, storico) per la nuova avventura.
+1. **Descrizione del dungeon** in `avventure/<id>/dungeon.json`: forme del pavimento (stanze, corridoi, grotte; quelle segrete sono marcate), simboli della legenda, zone della nebbia, zone iniziali, segreti, posti di partenza, tipi di mostro. Coordinate in quadretti. Il formato è documentato in `strumenti/mappe/README.md`.
+2. **Generazione** con `npm run mappa:genera -- avventure/<id>`. Produce:
+   - `avventura.json` (coordinate in pixel);
+   - `mappa_giocatori.png`;
+   - i ritagli `segreti/<id>.png`;
+   - per il solo Master `master/mappa_master.png` e `.pdf`, che **non** vanno mai nel tavolo.
+3. **Importazione** nel tavolo con `npm run avventura:importa -- avventure/<id>`. Valida tutto, copia nella cartella dati del server solo le immagini dichiarate e salva l'avventura nel database. Reimportare la stessa avventura la aggiorna.
+4. Il Master crea una **partita** con quell'avventura (step 4): lo stato iniziale (nebbia, pedine, mostri, storico) nasce con la partita.
 
-Requisito per l'MVP: questo flusso deve essere ripetibile e documentato. Il caricamento di un'avventura come pacchetto (immagini + file di descrizione) è il primo candidato dopo l'MVP.
+Il generatore (`strumenti/mappe/genera_mappa.py`) è uno strumento Python separato dall'app, gestito con `uv`. Con la descrizione della Sessione 0 riproduce in modo identico gli SVG del generatore originale del prototipo.
+
+Dopo l'MVP: caricamento di un'avventura dal pannello del Master (backlog §10, punto 1).
 
 ---
 
@@ -306,9 +310,7 @@ Materiale del gruppo, esterno a questo repository. Va usato come fonte di conten
 | Percorso | Contenuto |
 | --- | --- |
 | `tavolo_sorgenti/tavolo_template.html` | Prototipo del tavolo (solo riferimento funzionale e grafico) |
-| `tavolo_sorgenti/meta.json` | Zone, sovrapposizione e posizioni iniziali della Sessione 0 |
-| `tavolo_sorgenti/genera_mappa.py` | Generatore della mappa (versioni master / giocatori / passaggio) |
-| `tavolo_sorgenti/mappa_giocatori.png`, `passaggio.png` | Immagini usate dal tavolo |
+| `tavolo_sorgenti/meta.json`, `genera_mappa.py`, `mappa_giocatori.png`, `passaggio.png` | Originali del prototipo. Sostituiti nel repository da `avventure/sessione-0/` e `strumenti/mappe/` (gli originali restano nella cronologia di git, commit "Game data") |
 | `tavolo_sorgenti/regole.json` | Testo dei manuali BECMI estratto via OCR (variante scartata) |
 | `santuario_zebulon_dungeon/` | Avventura Sessione 0: documento, mappa del Master, legenda dei simboli |
 | `regole/` | Manuali BECMI in PDF (scansioni) e Schermo del Master |
@@ -342,8 +344,8 @@ L'MVP è pronto quando, in una prova con il Master e almeno due giocatori su dis
 
 ## 13. Domande aperte
 
-- Una partita cambia avventura nel tempo (campagna: sessione 0, X4, X5…) conservando i PG? Proposta: sì, la partita ha un'avventura corrente; cambiandola si azzerano nebbia e mostri, non i PG né lo storico.
-- I PG appartengono alla partita (proposta) o all'utente e si portano da una partita all'altra?
+- ~~Una partita cambia avventura nel tempo?~~ → No: una partita = una avventura (16/10/2026).
+- ~~I PG appartengono alla partita o all'utente?~~ → Alla partita (16/10/2026).
 - Un giocatore può muovere solo la propria pedina?
 - Quanto storico tiri conservare (sessione, campagna)?
 - "Chiedi a Claude" deve restare nell'MVP, visti i costi dell'API? In alternativa diventa una funzione attivabile per partita.
@@ -352,6 +354,7 @@ L'MVP è pronto quando, in una prova con il Master e almeno due giocatori su dis
 
 ## 14. Indicazioni per Claude Code
 
+- **All'inizio di ogni sessione** leggi la §17 (stato dei lavori) e poni all'utente le domande che vi sono elencate prima di scrivere codice. Alla fine della sessione aggiornala.
 - Scrivi interfaccia, testi e commenti rivolti all'utente in **italiano**; usa la terminologia BECMI italiana.
 - Tratta i **segreti dell'avventura** (mappa del Master, zone non scoperte, mostri nascosti) come dati sensibili: mai inviarli al client di un giocatore.
 - Ogni controllo di permesso va fatto anche lato server: ruolo applicativo (`ROLE_MASTER`/`ROLE_PLAYER`), partecipazione alla partita e ruolo nella partita. Ogni query sui dati di gioco filtra per `partita_id`.
@@ -396,7 +399,10 @@ apps/
 packages/
   shared/      schemi Zod, tipi dei messaggi, costanti di gioco (dadi, sigle)
 avventure/
-  sessione-0/  meta.json (zone, sovrapposizioni, posizioni, tipi di mostro) + immagini
+  sessione-0/  dungeon.json (descrizione) → avventura.json, mappa_giocatori.png, segreti/, master/
+strumenti/
+  mappe/       generatore di mappe in Python (uv): genera_mappa.py, README.md con il formato
+dati/          (non versionata) immagini delle avventure importate, servite solo dal server
 ```
 
 Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il server dopo aver verificato la partecipazione, e una sovrapposizione segreta solo se la sua zona è scoperta (§9, ultima riga).
@@ -405,6 +411,7 @@ Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il
 
 - **Il server è l'unica autorità.** Il client invia *comandi* (`zona:scopri`, `pedina:sposta`, `mostro:aggiungi`, `dadi:tira`, `narrazione:pubblica`…); il server valida (Zod), controlla i permessi (ruolo applicativo, partecipazione, ruolo nella partita), scrive su MySQL in una transazione e diffonde un *evento*. I dadi si tirano **sul server** (RF-52, RF-63).
 - **Rooms:** `partita:{id}` per tutti i collegati di una partita, `partita:{id}:master` per il Master. Gli eventi con spoiler (mostri in zone coperte, tiri nascosti, poligoni delle zone non scoperte) vanno solo alla room del Master; quando una zona viene scoperta, i giocatori ricevono in quel momento i mostri e la sovrapposizione che contiene (RF-44).
+- **Mappa filtrata (decisione del 16/10/2026):** ai giocatori non arriva mai `mappa_giocatori.png` intera. Il server compone per ogni partita un'immagine con le sole zone scoperte (libreria `sharp`, maschera dai poligoni delle zone), la rigenera a ogni scoperta e la tiene in cache. Il Master riceve l'immagine intera. Da realizzare con lo step 6.
 - **Viste filtrate:** una funzione `vistaGiocatore(stato)` e una `vistaMaster(stato)` costruiscono lo stato completo per ruolo; ogni istantanea (all'ingresso, alla riconnessione, su "Aggiorna ora") passa da lì.
 - **Versione:** ogni partita ha un contatore `versione` incrementato a ogni modifica; gli eventi lo portano con sé. Se il client nota un salto, chiede l'istantanea completa. Alla riconnessione chiede sempre l'istantanea (RF-91).
 - **Trascinamento (RF-94):** la posizione si salva al rilascio; durante il drag il client ignora gli aggiornamenti di quella pedina.
@@ -420,11 +427,11 @@ Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di 
 | `utenti` | `id`, `email` (unica), `password_hash` (`NULL` finché non viene scelta), `nome`, `avatar_url`, `ruolo` ENUM(`ROLE_MASTER`,`ROLE_PLAYER`), `attivo`, `creato_il` |
 | `sessioni` | `token_hash` (PK, SHA-256 del token del cookie), `utente_id`, `scade_il` (30 giorni), `creato_il` |
 | `recuperi_password` | `token_hash` (PK), `utente_id`, `scade_il`, `usato_il` (uso singolo), `creato_il` |
-| `avventure` | `id`, `slug` (unico), `titolo`, `sottotitolo`, `definizione` JSON (dimensioni mappa, zone, sovrapposizioni, posizioni iniziali, tipi di mostro), `cartella` |
-| `partite` | `id`, `titolo`, `master_id` → utenti, `avventura_id` → avventure, `stato` ENUM(`attiva`,`archiviata`), `versione`, `narrazione_testo`, `narrazione_pubblicata_il`, `creata_il`, `aggiornata_il` |
-| `partecipazioni` | PK(`partita_id`, `utente_id`), `ruolo` ENUM(`giocatore`,`osservatore`), `personaggio_id` (scelto), `creata_il` |
-| `inviti` | `id`, `partita_id`, `email`, `ruolo`, `personaggio_id`, `token_hash`, `scade_il`, `accettato_il` |
-| `personaggi` | `id`, `partita_id`, `nome`, `classe`, `sigla`, `colore`, `utente_id` (giocatore assegnato, facoltativo), `x`, `y` |
+| `avventure` | `id`, `slug` (unico, = `id` di `avventura.json`), `titolo`, `sottotitolo`, `definizione` JSON (il file `avventura.json` validato), `importata_il`, `aggiornata_il`. Immagini in `DATA_DIR/avventure/<slug>/` |
+| `partite` | `id`, `titolo`, `master_id` → utenti, `avventura_id` → avventure (fissa), `stato` ENUM(`attiva`,`archiviata`), `versione`, `creata_il`, `aggiornata_il`. Da aggiungere allo step 10: `narrazione_testo`, `narrazione_pubblicata_il` |
+| `partecipazioni` | PK(`partita_id`, `utente_id`), `ruolo` ENUM(`giocatore`,`osservatore`), `personaggio_id` ("Giochi come", RF-03: preselezionato quando il Master assegna un PG), `creata_il` |
+| `inviti` | `id`, `partita_id`, `email`, `ruolo`, `personaggio_id`, `token_hash` (unico), `scade_il` (7 giorni), `accettato_il`, `accettato_da`, `creato_il`. Un nuovo invito alla stessa email sostituisce quello in sospeso |
+| `personaggi` | `id`, `partita_id`, `nome` e `sigla` (unici nella partita), `classe`, `colore`, `utente_id` (giocatore assegnato, facoltativo; `NULL` se lascia la partita o diventa osservatore), `posto` (indice in `partenze` dell'avventura), `x`, `y` |
 | `zone_scoperte` | PK(`partita_id`, `zona_id`) |
 | `mostri` | `id`, `partita_id`, `nome`, `sigla`, `x`, `y` |
 | `tiri` | `id`, `partita_id`, `utente_id`, `personaggio_id`, `motivo`, `n_dadi`, `facce`, `modificatore`, `risultati` JSON, `totale`, `nascosto`, `creato_il`; indice (`partita_id`, `creato_il`) |
@@ -454,7 +461,7 @@ Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbo
 - **Un solo processo Node:** non servono sessioni "appiccicose" (*sticky*) né bilanciamento. Se in futuro si passasse a più processi, andrebbero aggiunti entrambi, insieme all'adapter Redis di Socket.IO.
 - **Node 24:** Debian 13 fornisce una versione più vecchia di Node, quindi si installa Node 24 LTS dal repository NodeSource. Gira con un utente di sistema dedicato (es. `tavolo`) e un servizio systemd (`deploy/tavolo.service`) con `Restart=on-failure` e variabili prese da `/etc/tavolo/tavolo.env` (permessi 600).
 - **MySQL 9.7:** Debian 13 fornisce MariaDB, non MySQL, quindi si installa dal repository APT ufficiale MySQL (`mysql-apt-config`). Va in ascolto solo su `127.0.0.1`, con un utente dedicato all'applicazione che ha i privilegi solo sul suo schema.
-- **Backup:** `mysqldump --single-transaction` notturno da un timer systemd, con rotazione, più una copia della cartella delle avventure.
+- **Backup:** `mysqldump --single-transaction` notturno da un timer systemd, con rotazione, più una copia della cartella dati (`DATA_DIR`, immagini delle avventure importate).
 - **Aggiornamento:** `git pull`, `npm ci`, build, migrazioni, `systemctl restart tavolo`. Va scritto come script `deploy/aggiorna.sh`.
 - **Firewall:** aperte solo le porte 22, 80 e 443.
 
@@ -467,7 +474,9 @@ Elenco completo e primo avvio nel `README.md`. I principali:
 - `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_TEST_*`. In locale è un database MySQL dedicato (`dandzapp_test` su `127.0.0.1`); in alternativa c'è il servizio Docker facoltativo `docker compose --profile db-test up -d`. I test ne cancellano i dati, quindi il nome deve finire con `_test`: il codice si rifiuta di procedere altrimenti. **Mai** puntare i test al database di sviluppo o di staging.
 - `npm run utente:crea-master -- email "Nome"`: crea il primo `ROLE_MASTER` senza password, oppure promuove un utente esistente. Stampa (e invia per email) un link valido 7 giorni per scegliere la password.
 - `npm run db:migra` / `npm run db:annulla`: migrazioni Kysely in `apps/server/src/db/migrazioni/`, con nome `AAAAMMGG_HHMM_descrizione.ts`. Ogni migrazione aggiorna anche `apps/server/src/db/schema.ts`.
-- Da aggiungere negli step successivi: `avventura:importa` (step 3).
+- `npm run mappa:genera -- avventure/<id>`: genera mappe e `avventura.json` da `dungeon.json` (richiede `uv`).
+- `npm run avventura:importa -- avventure/<id>`: importa o aggiorna un'avventura nel database indicato da `DB_*`, e le immagini in `DATA_DIR` (predefinita: `dati/` alla radice).
+- `avventure/` è esclusa da Prettier: in `dungeon.json` `18` e `18.0` producono SVG diversi.
 
 Note sulle versioni:
 - **SvelteKit 3:** la configurazione sta nel plugin `sveltekit({...})` di `vite.config.ts`; `svelte.config.js` non esiste più.
@@ -500,8 +509,8 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 | 0 ✔ | **Impalcatura** | Monorepo npm workspaces (`apps/server`, `apps/web`, `packages/shared`), TypeScript strict, ESLint/Prettier, Vitest, Playwright. Fastify che serve la SPA SvelteKit, Kysely con migratore, configurazione da `.env`, database di sviluppo e di test su MySQL 9.7, Mailpit per le email, endpoint `/api/salute`, CI su GitHub Actions. Si compila la §15.6 Comandi. | — |
 | 1 ✔ | **Utenti e autenticazione** | Tabelle `utenti` e `sessioni`. Registrazione (sempre `ROLE_PLAYER`), accesso, uscita, recupero password via email. Hash argon2id, cookie di sessione, limite ai tentativi di accesso, controllo dell'`Origin` sulle richieste che modificano dati. Comando `utente:crea-master`. Pagine Accedi, Registrati, Password dimenticata. | RF-01, RF-01b, RNF-05, RNF-06 |
 | 2 ✔ | **Amministrazione utenti** | Pannello riservato a `ROLE_MASTER`: elenco degli utenti, promozione a `ROLE_MASTER`, disattivazione (chiude anche le sessioni attive). Il sistema impedisce di declassare o disattivare l'ultimo `ROLE_MASTER`. | §4.1, RF-01b |
-| 3 | **Avventure** | Schema Zod del file `meta.json` (dimensioni, zone, sovrapposizioni, posizioni iniziali, tipi di mostro). Comando `avventura:importa <cartella>`, che valida e carica in `avventure`. La Sessione 0 viene convertita in `avventure/sessione-0/`. Le immagini stanno fuori dalla cartella pubblica, con un endpoint che le serve solo ai partecipanti. | RF-11, RF-12, RF-20, §8 |
-| 4 | **Partite e inviti** | Tabelle `partite`, `partecipazioni`, `inviti`, `personaggi`. Un `ROLE_MASTER` crea una partita (titolo e avventura). La pagina "Le mie partite" mostra le partite condotte e quelle a cui si partecipa. Il Master gestisce i PG (nome, classe, sigla, colore), invita per email con ruolo e PG, gestisce i partecipanti. L'invito si accetta anche passando dalla registrazione. Ogni accesso a una partita verifica la partecipazione. | RF-02, RF-03, RF-05, RF-06 |
+| 3 ✔ | **Avventure** | Generatore di mappe generico (`strumenti/mappe/`, descrizione in `dungeon.json`). Schema Zod di `avventura.json`, comando `avventura:importa <cartella>`, tabella `avventure`, `GET /api/avventure` (riepilogo senza spoiler, solo Master). La Sessione 0 è convertita in `avventure/sessione-0/`. Le immagini stanno in `DATA_DIR`, fuori dalla cartella pubblica; l'endpoint che le serve nascerà con le partite (step 4/6), perché solo allora esiste la partecipazione da verificare. | RF-11, RF-12, RF-20, §8 |
+| 4 ✔ | **Partite e inviti** | Tabelle `partite`, `partecipazioni`, `inviti`, `personaggi`. Un `ROLE_MASTER` crea una partita (titolo e avventura). La pagina "Le mie partite" mostra le partite condotte e quelle a cui si partecipa. Il Master gestisce i PG (nome, classe, sigla, colore), invita per email con ruolo e PG, gestisce i partecipanti. L'invito si accetta anche passando dalla registrazione e vale solo per l'email invitata; il Master riceve anche il link da consegnare a mano. Un partecipante può lasciare la partita. Ogni accesso a una partita verifica la partecipazione (404 per chi non partecipa). Pagine: `/`, `/partite/nuova`, `/partite/[id]` (scheda; diventerà il tavolo), `/partite/[id]/gestione`, `/inviti/[token]`. | RF-02, RF-03, RF-05, RF-06 |
 
 ### Traguardo 2 — Si gioca
 
@@ -523,3 +532,30 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 | 13 | **Collaudo e messa in linea** | Suite Playwright con i criteri della §12, giocata con più browser contemporanei (un Master, due giocatori, un non invitato). Test di sicurezza: comandi costruiti a mano da un `ROLE_PLAYER`, accesso a partite altrui, immagini segrete. Messa in linea su Debian 13 con Apache2 o nginx, systemd e MySQL 9.7 secondo la §15.5, con le configurazioni di esempio in `deploy/`. Partita di prova con il gruppo. | §12, RNF-07 |
 
 Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di un'avventura dal pannello del Master).
+
+---
+
+## 17. Stato dei lavori e prossima sessione
+
+> Sezione di passaggio tra una sessione di lavoro e l'altra. **All'inizio di una nuova sessione, Claude legge questa sezione e pone all'utente le domande elencate sotto prima di scrivere codice.** Le voci risolte vanno tolte da qui e riportate nelle sezioni giuste del documento.
+
+**Ultimo aggiornamento:** 16/10/2026.
+
+### Fatto
+
+- Step 0–4 della §16 completati e verificati: `npm run verifica` e `npm run test:e2e` passano (71 test Vitest, 26 Playwright).
+- Decisioni del 16/10/2026: i PG appartengono alla partita; una partita usa una sola avventura; il generatore di mappe è un motore generico guidato da `dungeon.json`; la mappa per i giocatori è composta dal server con le sole zone scoperte (§15.3). Il repository è pubblico e va bene così (progetto di prova): mappe del Master e descrizioni dei dungeon restano versionate.
+- Database:
+  - **staging** `dandzapp` su `mithrandir`: migrazioni fino a `20261016_1400_partite`, Sessione 0 importata (immagini in `dati/`);
+  - **test** `dandzapp_test` su `127.0.0.1`: credenziali in `.env` (`DB_TEST_*`).
+- Gli step 3 e 4 erano **senza commit** alla fine della sessione: verificare con `git status`.
+
+### Da chiedere all'utente all'inizio della prossima sessione
+
+1. **Primo Master sullo staging.** Chiedere se è stato creato con `npm run utente:crea-master -- email "Nome"`; serve per provare a mano gli step successivi.
+2. **CI su GitHub.** Chiedere se il workflow `.github/workflows/ci.yml` è stato eseguito dopo un push. Non è mai stato provato: in particolare l'immagine `mysql:9.7` e il fatto che la CI non ha `uv` (per ora non serve: i test usano i file già generati).
+3. **"Chiedi a Claude"** (§13): resta nell'MVP (step 11) o diventa facoltativa? Non blocca nulla fino allo step 11.
+
+### Prossimo passo
+
+Step 5 della §16: tempo reale con Socket.IO (cookie di sessione nell'handshake, rooms `partita:{id}` e `partita:{id}:master`, contatore `versione`, istantanee filtrate, presenza "Al tavolo", riga di stato del collegamento). Lo step 6 userà la mappa composta dal server (§15.3), con la libreria `sharp`.

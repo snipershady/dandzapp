@@ -10,7 +10,8 @@
     "db:annulla": "node src/db/migra.ts giu",
     "test": "vitest run",
     "check": "tsc -p tsconfig.json",
-    "utente:crea-master": "node src/cli/crea-master.ts"
+    "utente:crea-master": "node src/cli/crea-master.ts",
+    "avventura:importa": "node src/cli/importa-avventura.ts"
   },
   "dependencies": {
     "@dandzapp/shared": "^0.0.0",

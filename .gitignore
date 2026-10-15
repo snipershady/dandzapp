@@ -154,3 +154,9 @@ playwright-report/
 test-results/
 /nbproject/private/
 /nbproject/
+
+# Generatore di mappe
+strumenti/mappe/.venv/
+avventure/*/master/_*.svg
+# File delle avventure importate (immagini servite dal server)
+dati/

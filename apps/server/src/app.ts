@@ -8,6 +8,8 @@ import { creaPostino, type Postino } from './email/postino.ts';
 import { gestoreErrori } from './http/errori.ts';
 import { rotteAmministrazione } from './rotte/amministrazione.ts';
 import { rotteAuth } from './rotte/auth.ts';
+import { rotteAvventure } from './rotte/avventure.ts';
+import { rottePartite } from './rotte/partite.ts';
 import { rotteSalute } from './rotte/salute.ts';
 
 export type Dipendenze = {
@@ -41,6 +43,8 @@ export async function costruisciApp(
   rotteSalute(app, db);
   rotteAuth(app, completo);
   rotteAmministrazione(app, completo);
+  rotteAvventure(app, completo);
+  rottePartite(app, completo);
 
   // In produzione Fastify serve anche la SPA; in sviluppo la serve Vite.
   if (config.cartellaWeb) {

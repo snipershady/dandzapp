@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { ambienteTest } from '../server/test/ambiente-test.ts';
 
@@ -20,8 +22,12 @@ export default defineConfig({
   ],
   // Build della SPA servita da Fastify, come in produzione, sul database di test.
   webServer: {
-    command:
-      'npm run build && npm run db:migra --workspace @dandzapp/server && node ../server/src/index.ts',
+    command: [
+      'npm run build',
+      'npm run db:migra --workspace @dandzapp/server',
+      'npm run avventura:importa --workspace @dandzapp/server -- ../../avventure/sessione-0',
+      'node ../server/src/index.ts',
+    ].join(' && '),
     url: `http://127.0.0.1:${porta}/api/salute`,
     reuseExistingServer: false,
     timeout: 120_000,
@@ -31,6 +37,7 @@ export default defineConfig({
       // Molte registrazioni dallo stesso IP in pochi secondi: il limite è coperto da Vitest.
       LIMITE_TENTATIVI: 'false',
       APP_URL: `http://127.0.0.1:${porta}`,
+      DATA_DIR: path.join(tmpdir(), 'dandzapp-e2e-dati'),
     },
   },
 });
