@@ -1,8 +1,5 @@
 import { expect, test } from '@playwright/test';
-
-// Email diversa per ogni esecuzione e progetto: il database di test non viene svuotato qui.
-const emailUnica = (nome: string) =>
-  `${nome}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@esempio.it`;
+import { emailUnica } from './aiuti.ts';
 
 test('chi non ha effettuato l’accesso viene mandato alla pagina di accesso', async ({ page }) => {
   await page.goto('/');
