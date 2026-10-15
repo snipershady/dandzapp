@@ -417,8 +417,9 @@ Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di 
 
 | Tabella | Colonne principali |
 | --- | --- |
-| `utenti` | `id`, `email` (unica), `password_hash`, `nome`, `avatar_url`, `ruolo` ENUM(`ROLE_MASTER`,`ROLE_PLAYER`), `attivo`, `creato_il` |
-| `sessioni` | `token_hash` (PK), `utente_id`, `scade_il`, `creato_il` |
+| `utenti` | `id`, `email` (unica), `password_hash` (`NULL` finché non viene scelta), `nome`, `avatar_url`, `ruolo` ENUM(`ROLE_MASTER`,`ROLE_PLAYER`), `attivo`, `creato_il` |
+| `sessioni` | `token_hash` (PK, SHA-256 del token del cookie), `utente_id`, `scade_il` (30 giorni), `creato_il` |
+| `recuperi_password` | `token_hash` (PK), `utente_id`, `scade_il`, `usato_il` (uso singolo), `creato_il` |
 | `avventure` | `id`, `slug` (unico), `titolo`, `sottotitolo`, `definizione` JSON (dimensioni mappa, zone, sovrapposizioni, posizioni iniziali, tipi di mostro), `cartella` |
 | `partite` | `id`, `titolo`, `master_id` → utenti, `avventura_id` → avventure, `stato` ENUM(`attiva`,`archiviata`), `versione`, `narrazione_testo`, `narrazione_pubblicata_il`, `creata_il`, `aggiornata_il` |
 | `partecipazioni` | PK(`partita_id`, `utente_id`), `ruolo` ENUM(`giocatore`,`osservatore`), `personaggio_id` (scelto), `creata_il` |
@@ -463,14 +464,18 @@ Elenco completo e primo avvio nel `README.md`. I principali:
 
 - `npm run dev`: server Fastify (porta 3000) e Vite (porta 5173, con proxy per `/api` e `/socket.io`).
 - `npm run verifica`: lint, controllo dei tipi e test. Va eseguito prima di ogni commit.
-- `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_NAME_TEST`, che deve essere diverso da `DB_NAME` perché i test ne cancellano i dati.
+- `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_TEST_*`. In locale è un database MySQL dedicato (`dandzapp_test` su `127.0.0.1`); in alternativa c'è il servizio Docker facoltativo `docker compose --profile db-test up -d`. I test ne cancellano i dati, quindi il nome deve finire con `_test`: il codice si rifiuta di procedere altrimenti. **Mai** puntare i test al database di sviluppo o di staging.
+- `npm run utente:crea-master -- email "Nome"`: crea il primo `ROLE_MASTER` senza password, oppure promuove un utente esistente. Stampa (e invia per email) un link valido 7 giorni per scegliere la password.
 - `npm run db:migra` / `npm run db:annulla`: migrazioni Kysely in `apps/server/src/db/migrazioni/`, con nome `AAAAMMGG_HHMM_descrizione.ts`. Ogni migrazione aggiorna anche `apps/server/src/db/schema.ts`.
-- Da aggiungere negli step successivi: `utente:crea-master` (step 1), `avventura:importa` (step 3).
+- Da aggiungere negli step successivi: `avventura:importa` (step 3).
 
 Note sulle versioni:
 - **SvelteKit 3:** la configurazione sta nel plugin `sveltekit({...})` di `vite.config.ts`; `svelte.config.js` non esiste più.
 - **TypeScript 6.0:** la 7 non è ancora supportata da typescript-eslint e SvelteKit.
 - **Kysely 0.29:** il migratore si importa da `kysely/migration`.
+- **SvelteKit 3, import:** l'alias `$lib` è deprecato. Si usano i *subpath imports* di `apps/web/package.json` (`#lib/*`), con l'estensione esplicita per i `.ts` (`#lib/api.ts`).
+- **SvelteKit 3, `resolve()`:** i percorsi vanno scritti senza `/` iniziale (`resolve('accedi')`, `resolve('')` per la home). Ogni `href` e ogni `goto` passa da `resolve()`, come richiede ESLint.
+- **Dopo accesso e uscita:** si naviga con `goto(..., { invalidateAll: true })` e non con `invalidate()` seguito da `goto()`, altrimenti le guardie delle pagine scattano prima della navigazione.
 - **Node 24:** il server esegue i `.ts` direttamente (*type stripping*). Si usa solo sintassi TypeScript cancellabile (`erasableSyntaxOnly`: niente `enum` né `namespace`) e gli import relativi hanno l'estensione `.ts`.
 
 ---
@@ -492,8 +497,8 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 
 | # | Step | Contenuto | Requisiti |
 | --- | --- | --- | --- |
-| 0 | **Impalcatura** | Monorepo npm workspaces (`apps/server`, `apps/web`, `packages/shared`), TypeScript strict, ESLint/Prettier, Vitest, Playwright. Fastify che serve la SPA SvelteKit, Kysely con migratore, configurazione da `.env`, database di sviluppo e di test su MySQL 9.7, Mailpit per le email, endpoint `/api/salute`, CI su GitHub Actions. Si compila la §15.6 Comandi. | — |
-| 1 | **Utenti e autenticazione** | Tabelle `utenti` e `sessioni`. Registrazione (sempre `ROLE_PLAYER`), accesso, uscita, recupero password via email. Hash argon2id, cookie di sessione, limite ai tentativi di accesso, controllo dell'`Origin` sulle richieste che modificano dati. Comando `utente:crea-master`. Pagine Accedi, Registrati, Password dimenticata. | RF-01, RF-01b, RNF-05, RNF-06 |
+| 0 ✔ | **Impalcatura** | Monorepo npm workspaces (`apps/server`, `apps/web`, `packages/shared`), TypeScript strict, ESLint/Prettier, Vitest, Playwright. Fastify che serve la SPA SvelteKit, Kysely con migratore, configurazione da `.env`, database di sviluppo e di test su MySQL 9.7, Mailpit per le email, endpoint `/api/salute`, CI su GitHub Actions. Si compila la §15.6 Comandi. | — |
+| 1 ✔ | **Utenti e autenticazione** | Tabelle `utenti` e `sessioni`. Registrazione (sempre `ROLE_PLAYER`), accesso, uscita, recupero password via email. Hash argon2id, cookie di sessione, limite ai tentativi di accesso, controllo dell'`Origin` sulle richieste che modificano dati. Comando `utente:crea-master`. Pagine Accedi, Registrati, Password dimenticata. | RF-01, RF-01b, RNF-05, RNF-06 |
 | 2 | **Amministrazione utenti** | Pannello riservato a `ROLE_MASTER`: elenco degli utenti, promozione a `ROLE_MASTER`, disattivazione (chiude anche le sessioni attive). Il sistema impedisce di declassare o disattivare l'ultimo `ROLE_MASTER`. | §4.1, RF-01b |
 | 3 | **Avventure** | Schema Zod del file `meta.json` (dimensioni, zone, sovrapposizioni, posizioni iniziali, tipi di mostro). Comando `avventura:importa <cartella>`, che valida e carica in `avventure`. La Sessione 0 viene convertita in `avventure/sessione-0/`. Le immagini stanno fuori dalla cartella pubblica, con un endpoint che le serve solo ai partecipanti. | RF-11, RF-12, RF-20, §8 |
 | 4 | **Partite e inviti** | Tabelle `partite`, `partecipazioni`, `inviti`, `personaggi`. Un `ROLE_MASTER` crea una partita (titolo e avventura). La pagina "Le mie partite" mostra le partite condotte e quelle a cui si partecipa. Il Master gestisce i PG (nome, classe, sigla, colore), invita per email con ruolo e PG, gestisce i partecipanti. L'invito si accetta anche passando dalla registrazione. Ogni accesso a una partita verifica la partecipazione. | RF-02, RF-03, RF-05, RF-06 |

@@ -152,3 +152,5 @@ vite.config.ts.timestamp-*
 apps/web/build/
 playwright-report/
 test-results/
+/nbproject/private/
+/nbproject/

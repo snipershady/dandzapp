@@ -1,17 +1,13 @@
-import { existsSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
+import { ambienteTest } from './test/ambiente-test.ts';
 
-const fileEnv = new URL('../../.env', import.meta.url);
-if (existsSync(fileEnv)) process.loadEnvFile(fileEnv);
+// Impostate subito su process.env, così valgono anche per il setup globale (migrazioni)
+// e non solo dentro i test: nulla deve mai toccare il database di sviluppo o di staging.
+Object.assign(process.env, ambienteTest(), { APP_URL: 'http://localhost:5173' });
 
 export default defineConfig({
   test: {
-    // I test usano sempre il database di test (DB_NAME_TEST), mai quello di sviluppo.
-    env: {
-      NODE_ENV: 'test',
-      DB_NAME: process.env['DB_NAME_TEST'] ?? 'tavolo_test',
-      LOG_LEVEL: 'silent',
-    },
+    globalSetup: ['./test/setup-globale.ts'],
     fileParallelism: false,
   },
 });

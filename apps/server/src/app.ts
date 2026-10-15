@@ -1,19 +1,44 @@
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { pluginAuth } from './auth/plugin.ts';
 import type { Config } from './config.ts';
 import type { Db } from './db/database.ts';
+import { creaPostino, type Postino } from './email/postino.ts';
+import { gestoreErrori } from './http/errori.ts';
+import { rotteAuth } from './rotte/auth.ts';
 import { rotteSalute } from './rotte/salute.ts';
 
-export type Dipendenze = { config: Config; db: Db };
+export type Dipendenze = {
+  config: Config;
+  db: Db;
+  postino: Postino;
+  /** Orologio iniettabile, per i test sulle scadenze. */
+  ora: () => Date;
+};
 
-export async function costruisciApp({ config, db }: Dipendenze): Promise<FastifyInstance> {
+export async function costruisciApp(
+  dipendenze: Pick<Dipendenze, 'config' | 'db'> & Partial<Dipendenze>,
+): Promise<FastifyInstance> {
+  const { config, db } = dipendenze;
   const app = Fastify({
     logger: { level: config.livelloLog },
     // Dietro Apache2/nginx sulla stessa macchina (§15.5): ci si fida solo del proxy locale.
     trustProxy: '127.0.0.1',
   });
+  const completo: Dipendenze = {
+    config,
+    db,
+    postino: dipendenze.postino ?? creaPostino(config, app.log),
+    ora: dipendenze.ora ?? (() => new Date()),
+  };
+
+  gestoreErrori(app);
+  if (config.limiteTentativi) await app.register(fastifyRateLimit, { global: false });
+  await pluginAuth(app, completo);
 
   rotteSalute(app, db);
+  rotteAuth(app, completo);
 
   // In produzione Fastify serve anche la SPA; in sviluppo la serve Vite.
   if (config.cartellaWeb) {

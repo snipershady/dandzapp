@@ -8,6 +8,13 @@ on:
 jobs:
   verifica:
     runs-on: ubuntu-latest
+    env:
+      # Il database di test è il servizio mysql qui sotto (le variabili vincono su .env).
+      DB_TEST_HOST: 127.0.0.1
+      DB_TEST_PORT: 3306
+      DB_TEST_USER: tavolo
+      DB_TEST_PASSWORD: tavolo_test
+      DB_TEST_NAME: tavolo_test
     services:
       mysql:
         image: mysql:9.7
@@ -15,7 +22,7 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: tavolo_test
           MYSQL_USER: tavolo
-          MYSQL_PASSWORD: tavolo_dev
+          MYSQL_PASSWORD: tavolo_test
         ports:
           - 3306:3306
         options: >-

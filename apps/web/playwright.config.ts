@@ -1,8 +1,5 @@
-import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
-
-const fileEnv = new URL('../../.env', import.meta.url);
-if (existsSync(fileEnv)) process.loadEnvFile(fileEnv);
+import { ambienteTest } from '../server/test/ambiente-test.ts';
 
 const porta = 3100;
 
@@ -23,15 +20,17 @@ export default defineConfig({
   ],
   // Build della SPA servita da Fastify, come in produzione, sul database di test.
   webServer: {
-    command: 'npm run build && node ../server/src/index.ts',
+    command:
+      'npm run build && npm run db:migra --workspace @dandzapp/server && node ../server/src/index.ts',
     url: `http://127.0.0.1:${porta}/api/salute`,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
+      ...ambienteTest(),
       PORT: String(porta),
-      DB_NAME: process.env['DB_NAME_TEST'] ?? 'tavolo_test',
-      NODE_ENV: 'test',
-      LOG_LEVEL: 'warn',
+      // Molte registrazioni dallo stesso IP in pochi secondi: il limite è coperto da Vitest.
+      LIMITE_TENTATIVI: 'false',
+      APP_URL: `http://127.0.0.1:${porta}`,
     },
   },
 });

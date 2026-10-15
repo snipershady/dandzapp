@@ -15,6 +15,14 @@ const SchemaConfig = z.object({
   DB_PASSWORD: z.string(),
   DB_NAME: z.string().min(1),
   WEB_BUILD_DIR: z.string().default(''),
+  LIMITE_TENTATIVI: z.stringbool().default(true),
+  APP_URL: z.url().default('http://localhost:5173'),
+  SMTP_HOST: z.string().default(''),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: z.stringbool().default(false),
+  SMTP_USER: z.string().default(''),
+  SMTP_PASSWORD: z.string().default(''),
+  EMAIL_MITTENTE: z.string().default('Tavolo virtuale <tavolo@localhost>'),
 });
 
 export type Config = {
@@ -23,6 +31,13 @@ export type Config = {
   porta: number;
   livelloLog: string;
   db: { host: string; porta: number; utente: string; password: string; nome: string };
+  /** Indirizzo pubblico dell'app, senza `/` finale: link nelle email e controllo dell'Origin. */
+  urlApp: string;
+  /** `null` = nessun server SMTP: le email finiscono solo nel log. */
+  smtp: { host: string; porta: number; sicuro: boolean; utente: string; password: string } | null;
+  mittente: string;
+  /** Limite di richieste per IP su accesso, registrazione e recupero (disattivato solo nell'e2e). */
+  limiteTentativi: boolean;
   /** Cartella della build della SPA; `null` se non esiste (es. in sviluppo con Vite). */
   cartellaWeb: string | null;
 };
@@ -54,6 +69,18 @@ export function caricaConfig(env: NodeJS.ProcessEnv = process.env): Config {
       password: c.DB_PASSWORD,
       nome: c.DB_NAME,
     },
+    urlApp: c.APP_URL.replace(/\/+$/, ''),
+    smtp: c.SMTP_HOST
+      ? {
+          host: c.SMTP_HOST,
+          porta: c.SMTP_PORT,
+          sicuro: c.SMTP_SECURE,
+          utente: c.SMTP_USER,
+          password: c.SMTP_PASSWORD,
+        }
+      : null,
+    mittente: c.EMAIL_MITTENTE,
+    limiteTentativi: c.LIMITE_TENTATIVI,
     cartellaWeb: existsSync(`${cartellaWeb}/index.html`) ? cartellaWeb : null,
   };
 }

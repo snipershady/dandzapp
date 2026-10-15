@@ -1,7 +1,26 @@
-# Servizi di supporto allo sviluppo. MySQL 9.7 è installato localmente (vedi README).
+# Servizi di supporto allo sviluppo: docker compose up -d
 services:
   mailpit:
     image: axllent/mailpit:v1.27
     ports:
       - '127.0.0.1:1025:1025' # SMTP
       - '127.0.0.1:8025:8025' # interfaccia web: http://localhost:8025
+
+  # Facoltativo: database usa-e-getta per i test, se non c'è un MySQL locale dedicato.
+  # Avvio: docker compose --profile db-test up -d (porta 3307, dati in memoria).
+  mysql-test:
+    image: mysql:9.7
+    profiles: [db-test]
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: tavolo_test
+      MYSQL_USER: tavolo
+      MYSQL_PASSWORD: tavolo_test
+    ports:
+      - '127.0.0.1:3307:3306'
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-proot']
+      interval: 2s
+      retries: 30

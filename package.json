@@ -19,6 +19,7 @@
     "start": "npm run start --workspace @dandzapp/server",
     "db:migra": "npm run db:migra --workspace @dandzapp/server",
     "db:annulla": "npm run db:annulla --workspace @dandzapp/server",
+    "utente:crea-master": "npm run utente:crea-master --workspace @dandzapp/server --",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @dandzapp/web",
     "lint": "eslint . && prettier --check .",
