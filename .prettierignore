@@ -1,0 +1,8 @@
+node_modules/
+package-lock.json
+apps/web/build/
+apps/web/.svelte-kit/
+playwright-report/
+test-results/
+CLAUDE.md
+LICENSE

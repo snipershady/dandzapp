@@ -1,0 +1,26 @@
+{
+  "name": "@dandzapp/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "db:migra": "node src/db/migra.ts su",
+    "db:annulla": "node src/db/migra.ts giu",
+    "test": "vitest run",
+    "check": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dandzapp/shared": "^0.0.0",
+    "@fastify/static": "^10.1.6",
+    "fastify": "^5.12.7",
+    "kysely": "^0.29.6",
+    "mysql2": "^3.24.6",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "vitest": "^5.0.5"
+  }
+}

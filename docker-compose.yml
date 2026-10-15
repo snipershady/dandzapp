@@ -1,0 +1,7 @@
+# Servizi di supporto allo sviluppo. MySQL 9.7 è installato localmente (vedi README).
+services:
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - '127.0.0.1:1025:1025' # SMTP
+      - '127.0.0.1:8025:8025' # interfaccia web: http://localhost:8025

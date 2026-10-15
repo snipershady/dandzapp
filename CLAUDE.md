@@ -372,7 +372,7 @@ Vincolo: **MySQL 9.7** come unico database relazionale. Indicazioni di partenza:
 | Livello | Scelta | Perché |
 | --- | --- | --- |
 | Runtime | **Node.js 24 LTS** | Versione LTS corrente; `crypto.randomInt` per dadi sicuri e senza distorsioni (RF-52). |
-| Frontend | **Svelte 5 + SvelteKit 2** in modalità SPA (`adapter-static`), **Vite** | Reattività con le *runes* adatta a uno stato che cambia in tempo reale; bundle piccolo, buono su telefono (RNF-02). SvelteKit dà routing (`/accedi`, `/partite`, `/partite/[id]`) senza introdurre un secondo server: nessuna logica lato server in SvelteKit, così i controlli di permesso stanno in un solo posto. |
+| Frontend | **Svelte 5 + SvelteKit 3** in modalità SPA (`adapter-static`), **Vite** | Reattività con le *runes* adatta a uno stato che cambia in tempo reale; bundle piccolo, buono su telefono (RNF-02). SvelteKit dà routing (`/accedi`, `/partite`, `/partite/[id]`) senza introdurre un secondo server: nessuna logica lato server in SvelteKit, così i controlli di permesso stanno in un solo posto. |
 | Server HTTP | **Fastify 5** | Leggero, veloce, validazione degli schemi integrata; serve l'API REST, le immagini protette e i file statici della SPA. |
 | Tempo reale | **Socket.IO 4** (sopra WebSocket) | Rispetto a `ws` puro offre già: *rooms* (una per partita e una per i Master → isolamento RF-06 e filtro degli spoiler), riconnessione automatica, conferme (*ack*) dei comandi e ripiego su long-polling se il WebSocket è bloccato (RF-91). |
 | Accesso al DB | **Kysely** + driver **mysql2** | Query builder tipizzato: SQL esplicito e leggibile, transazioni, migrazioni versionate in TypeScript. Niente ORM pesante. |
@@ -459,7 +459,19 @@ Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbo
 
 ### 15.6 Comandi
 
-*Da definire con l'impalcatura del progetto* (sviluppo, test, migrazioni, `utente:crea-master` per il primo Master, importazione di un'avventura da `avventure/<slug>/meta.json`).
+Elenco completo e primo avvio nel `README.md`. I principali:
+
+- `npm run dev`: server Fastify (porta 3000) e Vite (porta 5173, con proxy per `/api` e `/socket.io`).
+- `npm run verifica`: lint, controllo dei tipi e test. Va eseguito prima di ogni commit.
+- `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_NAME_TEST`, che deve essere diverso da `DB_NAME` perché i test ne cancellano i dati.
+- `npm run db:migra` / `npm run db:annulla`: migrazioni Kysely in `apps/server/src/db/migrazioni/`, con nome `AAAAMMGG_HHMM_descrizione.ts`. Ogni migrazione aggiorna anche `apps/server/src/db/schema.ts`.
+- Da aggiungere negli step successivi: `utente:crea-master` (step 1), `avventura:importa` (step 3).
+
+Note sulle versioni:
+- **SvelteKit 3:** la configurazione sta nel plugin `sveltekit({...})` di `vite.config.ts`; `svelte.config.js` non esiste più.
+- **TypeScript 6.0:** la 7 non è ancora supportata da typescript-eslint e SvelteKit.
+- **Kysely 0.29:** il migratore si importa da `kysely/migration`.
+- **Node 24:** il server esegue i `.ts` direttamente (*type stripping*). Si usa solo sintassi TypeScript cancellabile (`erasableSyntaxOnly`: niente `enum` né `namespace`) e gli import relativi hanno l'estensione `.ts`.
 
 ---
 
