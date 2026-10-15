@@ -168,6 +168,8 @@ export type InfoInvito = z.infer<typeof InfoInvito>;
 
 export const DettaglioPartita = z.object({
   partita: RiepilogoPartita,
+  /** Versione dello stato di gioco: cresce a ogni modifica (§15.3). */
+  versione: z.number().int(),
   personaggi: z.array(Personaggio),
   partecipanti: z.array(Partecipante),
   /** Solo per il Master della partita. */

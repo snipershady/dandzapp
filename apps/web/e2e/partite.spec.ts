@@ -49,7 +49,10 @@ test('dall’invito alla partita: il Master invita, la giocatrice si registra e 
 
   await irene.getByRole('button', { name: 'Unisciti alla partita' }).click();
   await expect(irene.getByRole('heading', { name: titolo })).toBeVisible();
-  const shania = irene.getByRole('listitem').filter({ hasText: 'Shania' });
+  const shania = irene
+    .getByRole('region', { name: 'Personaggi' })
+    .getByRole('listitem')
+    .filter({ hasText: 'Shania' });
   await expect(shania).toContainText('Guerriera');
   await expect(shania).toContainText('Irene');
   await expect(irene.getByText('(tu)')).toBeVisible();

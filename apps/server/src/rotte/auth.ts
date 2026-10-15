@@ -30,7 +30,10 @@ import {
 const limite = (max: number) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
 
 /** Registrazione, accesso, uscita e recupero password (RF-01, RF-01b). */
-export function rotteAuth(app: FastifyInstance, { config, db, postino, ora }: Dipendenze): void {
+export function rotteAuth(
+  app: FastifyInstance,
+  { config, db, postino, ora, tempoReale }: Dipendenze,
+): void {
   app.post('/api/auth/registrazione', limite(5), async (richiesta, risposta) => {
     const dati = valida(CorpoRegistrazione, richiesta.body);
     const utente = await creaUtente(db, {
@@ -63,7 +66,10 @@ export function rotteAuth(app: FastifyInstance, { config, db, postino, ora }: Di
 
   app.post('/api/auth/uscita', async (richiesta, risposta) => {
     const token = richiesta.cookies[COOKIE_SESSIONE];
-    if (token) await chiudiSessione(db, token);
+    if (token) {
+      await chiudiSessione(db, token);
+      tempoReale.chiudiSessione(token);
+    }
     cancellaCookieSessione(risposta, config);
     return risposta.code(204).send();
   });
@@ -100,6 +106,7 @@ export function rotteAuth(app: FastifyInstance, { config, db, postino, ora }: Di
     await impostaPassword(db, utente.id, await hashPassword(dati.password));
     // La nuova password chiude ogni sessione aperta con quella vecchia.
     await chiudiSessioniUtente(db, utente.id);
+    tempoReale.chiudiUtente(utente.id);
     impostaCookieSessione(risposta, config, await creaSessione(db, utente.id, ora()));
     const corpo: RispostaUtente = { utente: aUtentePubblico(utente) };
     return corpo;

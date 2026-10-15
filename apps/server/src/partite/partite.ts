@@ -21,6 +21,7 @@ function queryRiepiloghi(db: Db) {
       'partite.id',
       'partite.titolo',
       'partite.stato',
+      'partite.versione',
       'partite.master_id',
       'master.nome as master_nome',
       'avventure.titolo as avventura_titolo',
@@ -100,6 +101,7 @@ export async function dettaglioPartita(
   ]);
   return {
     partita: aRiepilogo(riepilogo, ruolo),
+    versione: Number(riepilogo.versione),
     personaggi,
     partecipanti,
     ...(inviti ? { inviti } : {}),
@@ -121,13 +123,4 @@ export async function modificaPartita(
 /** Elimina la partita con PG, partecipazioni e inviti (cancellazione a cascata). */
 export async function eliminaPartita(db: Db, partitaId: number): Promise<void> {
   await db.deleteFrom('partite').where('id', '=', partitaId).execute();
-}
-
-/** Segna la partita come modificata (ordinamento in "Le mie partite"). */
-export async function toccaPartita(db: Db, partitaId: number): Promise<void> {
-  await db
-    .updateTable('partite')
-    .set({ aggiornata_il: new Date() })
-    .where('id', '=', partitaId)
-    .execute();
 }

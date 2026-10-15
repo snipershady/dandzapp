@@ -1,16 +1,27 @@
 <script lang="ts">
-  import { conPunti } from '#lib/testo.ts';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
+  import { onMount, untrack } from 'svelte';
   import { api, ErroreApi } from '#lib/api.ts';
   import Avviso from '#lib/componenti/Avviso.svelte';
   import PulsanteConferma from '#lib/componenti/PulsanteConferma.svelte';
-  import { NOMI_RUOLO } from '#lib/partita/caricamento.ts';
   import Pedina from '#lib/partita/Pedina.svelte';
+  import AlTavolo from '#lib/tavolo/AlTavolo.svelte';
+  import { Collegamento } from '#lib/tavolo/collegamento.svelte.ts';
+  import RigaStato from '#lib/tavolo/RigaStato.svelte';
+  import { conPunti } from '#lib/testo.ts';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
-  const { partita, personaggi, partecipanti } = $derived(data.dettaglio);
+
+  // Lo stato arriva dal caricamento della pagina e poi resta allineato in tempo reale.
+  const collegamento = new Collegamento(untrack(() => data.dettaglio));
+  onMount(() => {
+    collegamento.avvia();
+    return () => collegamento.ferma();
+  });
+
+  const { partita, personaggi, partecipanti } = $derived(collegamento.dettaglio);
   const nomeDi = (id: number | null) => partecipanti.find((p) => p.utenteId === id)?.nome;
   let errore = $state<string | null>(null);
 
@@ -28,84 +39,84 @@
 
 <main>
   <p><a href={resolve('')}>← Le mie partite</a></p>
-  <header>
-    <div>
-      <h1>{partita.titolo}</h1>
-      <p class="tenue">
-        {conPunti(
-          partita.avventura.titolo,
-          partita.avventura.sottotitolo,
-          `Master: ${partita.master.nome}`,
-          partita.stato === 'archiviata' && 'archiviata',
-        )}
-      </p>
-    </div>
-    {#if partita.mioRuolo === 'master'}
-      <a class="pulsante" href={resolve(`partite/${partita.id}/gestione`)}>Gestisci la partita</a>
-    {/if}
-  </header>
 
-  {#if errore}<Avviso>{errore}</Avviso>{/if}
-
-  <p class="tavolo">
-    Il tavolo di gioco (mappa, pedine, dadi) arriverà con i prossimi aggiornamenti.
-    {#if partita.mioRuolo === 'osservatore'}Partecipi come osservatore: potrai guardare, non
-      giocare.{/if}
-  </p>
-
-  <div class="colonne">
-    <section aria-labelledby="pg">
-      <h2 id="pg">Personaggi</h2>
-      {#if personaggi.length}
-        <ul class="elenco">
-          {#each personaggi as pg (pg.id)}
-            <li class:mio={pg.utenteId === data.utente.id}>
-              <Pedina colore={pg.colore} sigla={pg.sigla} nome={pg.nome} />
-              <span>
-                <span class="riga"
-                  ><strong>{pg.nome}</strong><span class="tenue"
-                    >{pg.classe ? ` · ${pg.classe}` : ''}</span
-                  ></span
-                >
-                <span class="tenue giocatore">{nomeDi(pg.utenteId) ?? 'nessun giocatore'}</span>
-              </span>
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p class="tenue">Il Master non ha ancora creato i personaggi.</p>
-      {/if}
-    </section>
-
-    <section aria-labelledby="gruppo">
-      <h2 id="gruppo">Al tavolo</h2>
-      <ul class="elenco">
-        <li>
-          <span><strong>{partita.master.nome}</strong> <span class="etichetta">Master</span></span>
-        </li>
-        {#each partecipanti as p (p.utenteId)}
-          <li>
-            <span>
-              <strong>{p.nome}</strong>
-              <span class="etichetta">{NOMI_RUOLO[p.ruolo]}</span>
-              {#if p.utenteId === data.utente.id}<span class="tenue">(tu)</span>{/if}
-            </span>
-          </li>
-        {/each}
-      </ul>
-      {#if partita.mioRuolo !== 'master'}
-        <p>
-          <PulsanteConferma
-            testo="Lascia la partita"
-            domanda="Vuoi davvero lasciare la partita?"
-            conferma="Lascia"
-            pericolosa
-            onconferma={lascia}
-          />
+  {#if collegamento.chiusura}
+    <Avviso>{collegamento.chiusura}.</Avviso>
+    <p><a href={resolve('')}>Torna alle tue partite</a></p>
+  {:else}
+    <header>
+      <div>
+        <h1>{partita.titolo}</h1>
+        <p class="tenue">
+          {conPunti(
+            partita.avventura.titolo,
+            partita.avventura.sottotitolo,
+            `Master: ${partita.master.nome}`,
+            partita.stato === 'archiviata' && 'archiviata',
+          )}
         </p>
+      </div>
+      {#if partita.mioRuolo === 'master'}
+        <a class="pulsante" href={resolve(`partite/${partita.id}/gestione`)}>Gestisci la partita</a>
       {/if}
-    </section>
-  </div>
+    </header>
+
+    {#if partita.mioRuolo === 'osservatore'}
+      <!-- RF-04: chi non può giocare lo sa subito, e sa cosa fare. -->
+      <div class="sola-lettura" role="alert">
+        <strong>Sola lettura.</strong> Partecipi come osservatore: puoi guardare il tavolo, ma non
+        tirare i dadi né muovere le pedine. Se devi giocare, chiedi a {partita.master.nome} di renderti
+        giocatore.
+      </div>
+    {/if}
+    {#if errore}<Avviso>{errore}</Avviso>{/if}
+
+    <p class="tavolo">
+      Il tavolo di gioco (mappa, pedine, dadi) arriverà con i prossimi aggiornamenti.
+    </p>
+
+    <RigaStato {collegamento} ruolo={partita.mioRuolo} />
+
+    <div class="colonne">
+      <section aria-labelledby="pg">
+        <h2 id="pg">Personaggi</h2>
+        {#if personaggi.length}
+          <ul class="elenco">
+            {#each personaggi as pg (pg.id)}
+              <li class:mio={pg.utenteId === data.utente.id}>
+                <Pedina colore={pg.colore} sigla={pg.sigla} nome={pg.nome} />
+                <span>
+                  <span class="riga"
+                    ><strong>{pg.nome}</strong><span class="tenue"
+                      >{pg.classe ? ` · ${pg.classe}` : ''}</span
+                    ></span
+                  >
+                  <span class="tenue giocatore">{nomeDi(pg.utenteId) ?? 'nessun giocatore'}</span>
+                </span>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="tenue">Il Master non ha ancora creato i personaggi.</p>
+        {/if}
+      </section>
+
+      <div>
+        <AlTavolo presenti={collegamento.presenti} {personaggi} io={data.utente.id} />
+        {#if partita.mioRuolo !== 'master'}
+          <p>
+            <PulsanteConferma
+              testo="Lascia la partita"
+              domanda="Vuoi davvero lasciare la partita?"
+              conferma="Lascia"
+              pericolosa
+              onconferma={lascia}
+            />
+          </p>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -136,6 +147,14 @@
     text-decoration: none;
     font-weight: 700;
   }
+  .sola-lettura {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border: 2px solid var(--errore);
+    background: var(--errore-sfondo);
+    color: var(--errore);
+    border-radius: 0.5rem;
+  }
   .tavolo {
     background: var(--superficie);
     border: 1px dashed var(--bordo);
@@ -146,6 +165,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
     gap: 1.5rem;
+    margin-top: 1rem;
   }
   .elenco {
     list-style: none;
@@ -170,12 +190,5 @@
   .giocatore {
     display: block;
     font-size: 0.9rem;
-  }
-  .etichetta {
-    font-size: 0.8rem;
-    padding: 0.05rem 0.5rem;
-    border-radius: 1rem;
-    border: 1px solid var(--bordo);
-    margin-left: 0.25rem;
   }
 </style>

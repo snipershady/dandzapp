@@ -27,7 +27,6 @@ import {
   elencaPartite,
   eliminaPartita,
   modificaPartita,
-  toccaPartita,
 } from '../partite/partite.ts';
 import { creaPersonaggio, eliminaPersonaggio, modificaPersonaggio } from '../partite/personaggi.ts';
 
@@ -39,7 +38,10 @@ const ParamInvito = z.object({ id: Id, invitoId: Id });
 const ParamToken = z.object({ token: z.string().min(1).max(200) });
 
 /** Partite, PG, partecipanti e inviti (RF-02, RF-03, RF-05, RF-06). */
-export function rottePartite(app: FastifyInstance, { config, db, postino, ora }: Dipendenze): void {
+export function rottePartite(
+  app: FastifyInstance,
+  { config, db, postino, ora, tempoReale }: Dipendenze,
+): void {
   /** Master della partita, con la partita ancora attiva per le modifiche ai partecipanti. */
   async function masterDi(richiesta: Parameters<typeof richiediUtente>[0], partitaId: number) {
     const utente = richiediUtente(richiesta);
@@ -72,6 +74,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     const { id } = valida(ParamPartita, richiesta.params);
     await masterDi(richiesta, id);
     await modificaPartita(db, id, valida(CorpoModificaPartita, richiesta.body));
+    await tempoReale.notifica(id);
     return risposta.code(204).send();
   });
 
@@ -79,6 +82,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     const { id } = valida(ParamPartita, richiesta.params);
     await masterDi(richiesta, id);
     await eliminaPartita(db, id);
+    tempoReale.partitaEliminata(id);
     return risposta.code(204).send();
   });
 
@@ -92,7 +96,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
       id,
       valida(CorpoPersonaggio, richiesta.body),
     );
-    await toccaPartita(db, id);
+    await tempoReale.notifica(id);
     return risposta.code(201).send(corpo);
   });
 
@@ -101,6 +105,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     await masterDi(richiesta, id);
     const modifiche = valida(CorpoModificaPersonaggio, richiesta.body);
     const corpo: Personaggio = await modificaPersonaggio(db, id, personaggioId, modifiche);
+    await tempoReale.notifica(id);
     return corpo;
   });
 
@@ -108,6 +113,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     const { id, personaggioId } = valida(ParamPersonaggio, richiesta.params);
     await masterDi(richiesta, id);
     await eliminaPersonaggio(db, id, personaggioId);
+    await tempoReale.notifica(id);
     return risposta.code(204).send();
   });
 
@@ -118,6 +124,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     await masterDi(richiesta, id);
     const { ruolo } = valida(CorpoModificaPartecipante, richiesta.body);
     await cambiaRuoloPartecipante(db, id, utenteId, ruolo);
+    await tempoReale.notifica(id);
     return risposta.code(204).send();
   });
 
@@ -130,6 +137,12 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
       throw new ErroreHttp(403, 'Solo il Master della partita può farlo');
     }
     await rimuoviPartecipante(db, id, utenteId);
+    await tempoReale.espelli(
+      id,
+      utenteId,
+      utenteId === utente.id ? 'Hai lasciato la partita' : 'Il Master ti ha tolto dalla partita',
+    );
+    await tempoReale.notifica(id);
     return risposta.code(204).send();
   });
 
@@ -159,6 +172,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
         }),
       )
       .catch((errore: unknown) => richiesta.log.error(errore, 'Invio email non riuscito'));
+    await tempoReale.notifica(id, { soloMaster: true });
     const corpo: RispostaInvitoCreato = { invito, link };
     return risposta.code(201).send(corpo);
   });
@@ -167,6 +181,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     const { id, invitoId } = valida(ParamInvito, richiesta.params);
     await masterDi(richiesta, id);
     await revocaInvito(db, id, invitoId);
+    await tempoReale.notifica(id, { soloMaster: true });
     return risposta.code(204).send();
   });
 
@@ -181,7 +196,7 @@ export function rottePartite(app: FastifyInstance, { config, db, postino, ora }:
     const utente = richiediUtente(richiesta);
     const { token } = valida(ParamToken, richiesta.params);
     const partitaId = await accettaInvito(db, { token, utente, ora: ora() });
-    await toccaPartita(db, partitaId);
+    await tempoReale.notifica(partitaId);
     const corpo: RispostaPartitaCreata = { id: partitaId };
     return corpo;
   });

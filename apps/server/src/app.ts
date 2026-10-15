@@ -11,6 +11,7 @@ import { rotteAuth } from './rotte/auth.ts';
 import { rotteAvventure } from './rotte/avventure.ts';
 import { rottePartite } from './rotte/partite.ts';
 import { rotteSalute } from './rotte/salute.ts';
+import { avviaTempoReale, type TempoReale } from './tempo-reale/tempo-reale.ts';
 
 export type Dipendenze = {
   config: Config;
@@ -18,10 +19,12 @@ export type Dipendenze = {
   postino: Postino;
   /** Orologio iniettabile, per i test sulle scadenze. */
   ora: () => Date;
+  /** Socket.IO: notifiche ai collegati dopo ogni modifica (§15.3). */
+  tempoReale: TempoReale;
 };
 
 export async function costruisciApp(
-  dipendenze: Pick<Dipendenze, 'config' | 'db'> & Partial<Dipendenze>,
+  dipendenze: Pick<Dipendenze, 'config' | 'db'> & Partial<Omit<Dipendenze, 'tempoReale'>>,
 ): Promise<FastifyInstance> {
   const { config, db } = dipendenze;
   const app = Fastify({
@@ -29,7 +32,7 @@ export async function costruisciApp(
     // Dietro Apache2/nginx sulla stessa macchina (§15.5): ci si fida solo del proxy locale.
     trustProxy: '127.0.0.1',
   });
-  const completo: Dipendenze = {
+  const base = {
     config,
     db,
     postino: dipendenze.postino ?? creaPostino(config, app.log),
@@ -38,7 +41,12 @@ export async function costruisciApp(
 
   gestoreErrori(app);
   if (config.limiteTentativi) await app.register(fastifyRateLimit, { global: false });
-  await pluginAuth(app, completo);
+  await pluginAuth(app, base);
+
+  // Socket.IO sullo stesso server HTTP, con lo stesso cookie di sessione.
+  const tempoReale = avviaTempoReale(app, base);
+  app.addHook('onClose', () => tempoReale.chiudi());
+  const completo: Dipendenze = { ...base, tempoReale };
 
   rotteSalute(app, db);
   rotteAuth(app, completo);

@@ -1,0 +1,301 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type {
+  EventiDalClient,
+  EventiDalServer,
+  EventoPartita,
+  PresenteAlTavolo,
+  RispostaEntra,
+} from '@dandzapp/shared';
+import { io as ioClient, type Socket } from 'socket.io-client';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { importaAvventura } from '../src/avventure/importa.ts';
+import { creaOPromuoviMaster } from '../src/utenti/master.ts';
+import { creaContesto, registra, type Contesto } from './aiuti.ts';
+
+type Client = Socket<EventiDalServer, EventiDalClient>;
+
+const SESSIONE_0 = fileURLToPath(new URL('../../../avventure/sessione-0', import.meta.url));
+
+let ctx: Contesto;
+let temporanea: string;
+let indirizzo: string;
+let master: string;
+let partitaId: number;
+const aperti: Client[] = [];
+
+beforeEach(async () => {
+  ctx = await creaContesto();
+  temporanea = await mkdtemp(path.join(tmpdir(), 'dandzapp-tr-'));
+  await importaAvventura(ctx.db, { cartella: SESSIONE_0, cartellaDati: temporanea });
+  await ctx.app.listen({ host: '127.0.0.1', port: 0 });
+  indirizzo = `http://127.0.0.1:${(ctx.app.server.address() as AddressInfo).port}`;
+
+  master = await registra(ctx.app, { email: 'marco@esempio.it', nome: 'Marco' });
+  await creaOPromuoviMaster(ctx.db, { email: 'marco@esempio.it', nome: '' });
+  const r = await chiama(master, 'POST', '/api/partite', {
+    titolo: 'Il santuario sepolto',
+    avventura: 'sessione-0',
+  });
+  partitaId = r.json().id as number;
+});
+
+afterEach(async () => {
+  for (const s of aperti.splice(0)) s.disconnect();
+  await ctx.chiudi();
+  await rm(temporanea, { recursive: true, force: true });
+});
+
+const chiama = (
+  token: string | null,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  url: string,
+  payload?: object,
+) =>
+  ctx.app.inject({
+    method,
+    url,
+    ...(payload ? { payload } : {}),
+    ...(token ? { cookies: { sessione: token } } : {}),
+  });
+
+/** Client collegato con la sessione indicata (o senza), via WebSocket. */
+function collega(token: string | null, origine?: string): Client {
+  const headers: Record<string, string> = {};
+  if (token) headers['cookie'] = `sessione=${token}`;
+  if (origine) headers['origin'] = origine;
+  const s: Client = ioClient(indirizzo, {
+    path: '/socket.io',
+    transports: ['websocket'],
+    extraHeaders: headers,
+    reconnection: false,
+    forceNew: true,
+  });
+  aperti.push(s);
+  return s;
+}
+
+const errore = (s: Client) =>
+  new Promise<string>((ok) => s.once('connect_error', (e) => ok(e.message)));
+const connesso = (s: Client) => new Promise<void>((ok) => s.once('connect', () => ok()));
+
+/** Primo evento del tipo indicato, o errore dopo `ms`. */
+function prossimo<E extends keyof EventiDalServer>(
+  s: Client,
+  evento: E,
+  ms = 2000,
+): Promise<Parameters<EventiDalServer[E]>> {
+  return new Promise((ok, ko) => {
+    const timer = setTimeout(() => ko(new Error(`Nessun evento ${evento} in ${ms} ms`)), ms);
+    s.once(evento, ((...args: Parameters<EventiDalServer[E]>) => {
+      clearTimeout(timer);
+      ok(args);
+    }) as never);
+  });
+}
+
+/** Raccoglie gli eventi di un tipo per poter verificare anche che NON arrivino. */
+function registro<E extends keyof EventiDalServer>(s: Client, evento: E) {
+  const ricevuti: Parameters<EventiDalServer[E]>[] = [];
+  s.on(evento, ((...args: Parameters<EventiDalServer[E]>) => ricevuti.push(args)) as never);
+  return ricevuti;
+}
+
+const entra = (s: Client, id = partitaId) =>
+  new Promise<RispostaEntra>((ok) => s.emit('partita:entra', id, ok));
+
+const attendi = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
+/** Giocatore invitato e già dentro la partita. */
+async function giocatore(email: string, ruolo: 'giocatore' | 'osservatore' = 'giocatore') {
+  const token = await registra(ctx.app, { email, nome: email.split('@')[0] ?? 'x' });
+  const invito = await chiama(master, 'POST', `/api/partite/${partitaId}/inviti`, { email, ruolo });
+  const tokenInvito = (invito.json().link as string).split('/').at(-1);
+  await chiama(token, 'POST', `/api/inviti/${tokenInvito}/accetta`);
+  const id = (await chiama(token, 'GET', '/api/auth/io')).json().utente.id as number;
+  return { token, id };
+}
+
+const nomi = (p: PresenteAlTavolo[]) => p.map((x) => `${x.nome}:${x.ruolo}`);
+
+describe('collegamento', () => {
+  it('senza sessione il collegamento viene rifiutato', async () => {
+    expect(await errore(collega(null))).toBe('Devi accedere per continuare');
+    expect(await errore(collega('token-inventato'))).toBe('Devi accedere per continuare');
+  });
+
+  it("rifiuta un collegamento da un'altra origine", async () => {
+    const s = collega(master, 'https://sito-malevolo.example');
+    await expect(errore(s)).resolves.toBeTruthy();
+    expect(s.connected).toBe(false);
+  });
+
+  it('chi non partecipa non entra nella partita e non ne riceve gli eventi', async () => {
+    const estraneo = await registra(ctx.app, { email: 'estraneo@esempio.it' });
+    const s = collega(estraneo);
+    await connesso(s);
+    expect(await entra(s)).toEqual({ ok: false, errore: 'Partita non trovata' });
+    expect(await entra(s, 99999)).toEqual({ ok: false, errore: 'Partita non trovata' });
+    const eventi = registro(s, 'partita:evento');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/personaggi`, { nome: 'S', sigla: 'S' });
+    await attendi(200);
+    expect(eventi).toEqual([]);
+  });
+});
+
+describe('istantanea e versione', () => {
+  it("all'ingresso arriva lo stato della partita filtrato per ruolo", async () => {
+    const irene = await giocatore('irene@esempio.it');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/inviti`, { email: 'fabio@esempio.it' });
+
+    const sm = collega(master);
+    const si = collega(irene.token);
+    const [rm_, ri] = [await entra(sm), await entra(si)];
+    if (!rm_.ok || !ri.ok) throw new Error('ingresso fallito');
+    expect(rm_.istantanea.dettaglio.inviti?.map((i) => i.email)).toEqual(['fabio@esempio.it']);
+    expect(ri.istantanea.dettaglio.inviti).toBeUndefined();
+    expect(ri.istantanea.versione).toBe(rm_.istantanea.versione);
+  });
+
+  it('ogni modifica incrementa la versione e arriva a tutti i collegati', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const si = collega(irene.token);
+    const ri = await entra(si);
+    if (!ri.ok) throw new Error('ingresso fallito');
+    const prima = ri.istantanea.versione;
+
+    const evento = prossimo(si, 'partita:evento');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/personaggi`, {
+      nome: 'Shania',
+      sigla: 'Sh',
+      utenteId: irene.id,
+    });
+    const [e] = await evento;
+    expect(e).toEqual<EventoPartita>({ versione: prima + 1, tipo: 'modificata' });
+
+    const istantanea = await new Promise<Awaited<ReturnType<typeof entra>>>((ok) =>
+      si.emit('partita:istantanea', ok as never),
+    );
+    expect(istantanea.ok && istantanea.istantanea.dettaglio.personaggi.map((p) => p.nome)).toEqual([
+      'Shania',
+    ]);
+    const versione = await new Promise((ok) => si.emit('partita:versione', ok));
+    expect(versione).toEqual({ ok: true, versione: prima + 1 });
+  });
+
+  it('le modifiche riservate al Master (inviti) non arrivano ai giocatori', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const sm = collega(master);
+    const si = collega(irene.token);
+    await entra(sm);
+    await entra(si);
+    const eventiIrene = registro(si, 'partita:evento');
+
+    const perMaster = prossimo(sm, 'partita:evento');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/inviti`, { email: 'fabio@esempio.it' });
+    await perMaster;
+    await attendi(200);
+    expect(eventiIrene).toEqual([]);
+  });
+
+  it('le partite sono isolate: gli eventi di una non arrivano all’altra', async () => {
+    const altra = (
+      await chiama(master, 'POST', '/api/partite', { titolo: 'Altra', avventura: 'sessione-0' })
+    ).json().id as number;
+    const s = collega(master);
+    await entra(s, altra);
+    const eventi = registro(s, 'partita:evento');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/personaggi`, { nome: 'S', sigla: 'S' });
+    await attendi(200);
+    expect(eventi).toEqual([]);
+  });
+});
+
+describe('presenza "Al tavolo" (RF-80, RF-81)', () => {
+  it('mostra chi ha la pagina aperta, con il ruolo; più schede contano una volta', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const oss = await giocatore('oss@esempio.it', 'osservatore');
+
+    const sm = collega(master);
+    await entra(sm);
+    const scheda1 = collega(irene.token);
+    const scheda2 = collega(irene.token);
+    const so = collega(oss.token);
+    await entra(scheda1);
+    await entra(scheda2);
+    const ultimo = prossimo(sm, 'partita:presenti');
+    await entra(so);
+    const [presenti] = await ultimo;
+    expect(nomi(presenti)).toEqual(['irene:giocatore', 'Marco:master', 'oss:osservatore']);
+
+    // Chiudendo una delle due schede Irene resta al tavolo; chiudendo l'altra se ne va.
+    scheda1.disconnect();
+    await attendi(200);
+    const uscita = prossimo(sm, 'partita:presenti');
+    scheda2.disconnect();
+    expect(nomi((await uscita)[0])).toEqual(['Marco:master', 'oss:osservatore']);
+  });
+
+  it('un cambio di ruolo si vede subito nella presenza', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const sm = collega(master);
+    const si = collega(irene.token);
+    await entra(sm);
+    await entra(si);
+    const aggiornata = prossimo(sm, 'partita:presenti');
+    await chiama(master, 'PATCH', `/api/partite/${partitaId}/partecipanti/${irene.id}`, {
+      ruolo: 'osservatore',
+    });
+    expect(nomi((await aggiornata)[0])).toEqual(['irene:osservatore', 'Marco:master']);
+  });
+});
+
+describe('uscite forzate', () => {
+  it('chi viene tolto dalla partita riceve "espulso" e smette di ricevere eventi', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const si = collega(irene.token);
+    await entra(si);
+    const espulso = prossimo(si, 'partita:espulso');
+    await chiama(master, 'DELETE', `/api/partite/${partitaId}/partecipanti/${irene.id}`);
+    expect((await espulso)[0]).toBe('Il Master ti ha tolto dalla partita');
+
+    const eventi = registro(si, 'partita:evento');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/personaggi`, { nome: 'S', sigla: 'S' });
+    await attendi(200);
+    expect(eventi).toEqual([]);
+    expect(await new Promise((ok) => si.emit('partita:istantanea', ok))).toEqual({
+      ok: false,
+      errore: 'Non sei in una partita',
+    });
+  });
+
+  it('eliminando la partita i collegati ricevono "eliminata"', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const si = collega(irene.token);
+    await entra(si);
+    const eliminata = prossimo(si, 'partita:eliminata');
+    await chiama(master, 'DELETE', `/api/partite/${partitaId}`);
+    await expect(eliminata).resolves.toEqual([]);
+  });
+
+  it("l'uscita (logout) chiude i collegamenti di quella sessione", async () => {
+    const s = collega(master);
+    await connesso(s);
+    const chiuso = new Promise<void>((ok) => s.once('disconnect', () => ok()));
+    await chiama(master, 'POST', '/api/auth/uscita');
+    await chiuso;
+    expect(s.connected).toBe(false);
+  });
+
+  it('disattivare un account ne chiude i collegamenti', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const si = collega(irene.token);
+    await connesso(si);
+    const chiuso = new Promise<void>((ok) => si.once('disconnect', () => ok()));
+    await chiama(master, 'PATCH', `/api/amministrazione/utenti/${irene.id}`, { attivo: false });
+    await chiuso;
+  });
+});
