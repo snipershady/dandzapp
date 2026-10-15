@@ -383,7 +383,7 @@ Vincolo: **MySQL 9.7** come unico database relazionale. Indicazioni di partenza:
 | Test | **Vitest** (unità e integrazione, con MySQL reale di test), **Playwright** (end-to-end con più browser contemporanei per i criteri di §12) | |
 | Qualità | ESLint + Prettier (con plugin Svelte), `svelte-check`, `tsc --noEmit` | |
 | Monorepo | **npm workspaces** | Nessuno strumento in più. |
-| Hosting | Una VPS piccola: Node (systemd) + MySQL 9.7 + **Caddy** (HTTPS automatico) | Pochi euro al mese per molti gruppi (RNF-07). |
+| Hosting | Server **Debian 13** con **Apache2 oppure nginx** come proxy inverso, Node gestito da systemd, MySQL 9.7 (vedi §15.5) | Pochi euro al mese per molti gruppi (RNF-07). |
 
 Scartati: `ws` puro (andrebbero riscritti rooms, riconnessione e ripiego); NestJS (troppo apparato per il progetto); Prisma (più pesante, SQL meno controllabile); Firebase/Supabase (esclusi dal vincolo MySQL); SSR di SvelteKit (doppio server e doppi controlli di permesso senza un vero vantaggio per un'app dietro accesso).
 
@@ -430,6 +430,79 @@ Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di 
 
 Ogni query sui dati di gioco filtra per `partita_id`, e l'accesso alla partita è verificato prima (`partecipazioni` oppure `partite.master_id`).
 
-### 15.5 Comandi
+### 15.5 Deploy
+
+Il server di produzione è **Debian 13 (trixie)** con **Apache2 oppure nginx**: va supportato uno qualunque dei due, e il repository contiene una configurazione di esempio per entrambi in `deploy/apache2/` e `deploy/nginx/`.
+
+```
+Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbot)
+                        │  proxy inverso (HTTP + upgrade WebSocket)
+                        ▼
+                   Node 24 (systemd, ascolta solo su 127.0.0.1:3000)
+                        │
+                        ▼
+                   MySQL 9.7 (solo locale)
+```
+
+- **Ruolo del web server:** TLS, compressione, redirect da HTTP a HTTPS, intestazioni di sicurezza (HSTS, `X-Content-Type-Options`, CSP) e proxy verso Node. Non contiene logica dell'applicazione e non fa controlli di permesso.
+- **WebSocket:** Socket.IO risponde sul percorso `/socket.io/`, e il proxy deve inoltrare l'upgrade.
+  - **nginx:** `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade` e `proxy_set_header Connection "upgrade"`. Serve anche un `proxy_read_timeout` lungo (es. `3600s`), altrimenti nginx chiude i collegamenti inattivi.
+  - **Apache2:** moduli `proxy`, `proxy_http`, `proxy_wstunnel`, `headers`, `ssl`, `rewrite`, con `ProxyPass / http://127.0.0.1:3000/ upgrade=websocket` (Apache ≥ 2.4.47, quindi va bene la versione di Debian 13) e `ProxyPreserveHost On`.
+- **Intestazioni inoltrate:** il proxy passa `X-Forwarded-For` e `X-Forwarded-Proto`. Fastify usa `trustProxy` limitato a `127.0.0.1`, così riconosce l'IP reale (per il limite ai tentativi di accesso) e l'HTTPS (cookie `Secure`).
+- **File statici:** la build della SPA (`apps/web/build`) può essere servita direttamente da Apache2/nginx per alleggerire Node. Le immagini delle avventure e le sovrapposizioni segrete **no**: passano sempre da Node, che verifica partecipazione e zona scoperta. Stanno fuori dalla `DocumentRoot` / `root`.
+- **Un solo processo Node:** non servono sessioni "appiccicose" (*sticky*) né bilanciamento. Se in futuro si passasse a più processi, andrebbero aggiunti entrambi, insieme all'adapter Redis di Socket.IO.
+- **Node 24:** Debian 13 fornisce una versione più vecchia di Node, quindi si installa Node 24 LTS dal repository NodeSource. Gira con un utente di sistema dedicato (es. `tavolo`) e un servizio systemd (`deploy/tavolo.service`) con `Restart=on-failure` e variabili prese da `/etc/tavolo/tavolo.env` (permessi 600).
+- **MySQL 9.7:** Debian 13 fornisce MariaDB, non MySQL, quindi si installa dal repository APT ufficiale MySQL (`mysql-apt-config`). Va in ascolto solo su `127.0.0.1`, con un utente dedicato all'applicazione che ha i privilegi solo sul suo schema.
+- **Backup:** `mysqldump --single-transaction` notturno da un timer systemd, con rotazione, più una copia della cartella delle avventure.
+- **Aggiornamento:** `git pull`, `npm ci`, build, migrazioni, `systemctl restart tavolo`. Va scritto come script `deploy/aggiorna.sh`.
+- **Firewall:** aperte solo le porte 22, 80 e 443.
+
+### 15.6 Comandi
 
 *Da definire con l'impalcatura del progetto* (sviluppo, test, migrazioni, `utente:crea-master` per il primo Master, importazione di un'avventura da `avventure/<slug>/meta.json`).
+
+---
+
+## 16. Piano di sviluppo
+
+Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione, e alla fine l'app funziona. Si procede in ordine: ogni step dipende dai precedenti. Per gli step 4 e 6 valgono le proposte della §13 (PG legati alla partita, una sola avventura corrente) finché non vengono confermate o cambiate.
+
+**Definizione di fatto, valida per ogni step:**
+- migrazioni MySQL versionate e reversibili;
+- ogni comando è validato con Zod e ogni permesso è controllato lato server;
+- ci sono test Vitest per la logica e i permessi, compreso il caso "utente non autorizzato";
+- c'è un test Playwright per il flusso principale;
+- lint, `svelte-check` e `tsc` sono puliti;
+- l'interfaccia è in italiano;
+- l'RF coperto è citato nel commit.
+
+### Traguardo 1 — Si entra e si prepara una partita
+
+| # | Step | Contenuto | Requisiti |
+| --- | --- | --- | --- |
+| 0 | **Impalcatura** | Monorepo npm workspaces (`apps/server`, `apps/web`, `packages/shared`), TypeScript strict, ESLint/Prettier, Vitest, Playwright. Fastify che serve la SPA SvelteKit, Kysely con migratore, configurazione da `.env`, database di sviluppo e di test su MySQL 9.7, Mailpit per le email, endpoint `/api/salute`, CI su GitHub Actions. Si compila la §15.6 Comandi. | — |
+| 1 | **Utenti e autenticazione** | Tabelle `utenti` e `sessioni`. Registrazione (sempre `ROLE_PLAYER`), accesso, uscita, recupero password via email. Hash argon2id, cookie di sessione, limite ai tentativi di accesso, controllo dell'`Origin` sulle richieste che modificano dati. Comando `utente:crea-master`. Pagine Accedi, Registrati, Password dimenticata. | RF-01, RF-01b, RNF-05, RNF-06 |
+| 2 | **Amministrazione utenti** | Pannello riservato a `ROLE_MASTER`: elenco degli utenti, promozione a `ROLE_MASTER`, disattivazione (chiude anche le sessioni attive). Il sistema impedisce di declassare o disattivare l'ultimo `ROLE_MASTER`. | §4.1, RF-01b |
+| 3 | **Avventure** | Schema Zod del file `meta.json` (dimensioni, zone, sovrapposizioni, posizioni iniziali, tipi di mostro). Comando `avventura:importa <cartella>`, che valida e carica in `avventure`. La Sessione 0 viene convertita in `avventure/sessione-0/`. Le immagini stanno fuori dalla cartella pubblica, con un endpoint che le serve solo ai partecipanti. | RF-11, RF-12, RF-20, §8 |
+| 4 | **Partite e inviti** | Tabelle `partite`, `partecipazioni`, `inviti`, `personaggi`. Un `ROLE_MASTER` crea una partita (titolo e avventura). La pagina "Le mie partite" mostra le partite condotte e quelle a cui si partecipa. Il Master gestisce i PG (nome, classe, sigla, colore), invita per email con ruolo e PG, gestisce i partecipanti. L'invito si accetta anche passando dalla registrazione. Ogni accesso a una partita verifica la partecipazione. | RF-02, RF-03, RF-05, RF-06 |
+
+### Traguardo 2 — Si gioca
+
+| # | Step | Contenuto | Requisiti |
+| --- | --- | --- | --- |
+| 5 | **Tempo reale e presenza** | Socket.IO autenticato con il cookie di sessione. Ingresso nelle rooms `partita:{id}` e `partita:{id}:master` dopo la verifica della partecipazione. Contatore `versione`, istantanea filtrata con `vistaMaster` / `vistaGiocatore`, risincronizzazione alla riconnessione e su salto di versione. Riquadro "Al tavolo", riga di stato del collegamento con "Aggiorna ora". | RF-80, RF-81, RF-90, RF-91, RF-92, RF-93 |
+| 6 | **Mappa e pedine dei PG** | Mappa in SVG con l'immagine dell'avventura, griglia, scala grafica e nord, adattata alla larghezza dello schermo. Pedine tonde con sigla, colore e nome al passaggio del mouse; la propria è evidenziata. Trascinamento con mouse e dito, salvato al rilascio, senza "salti" (RF-94). Il Master può riportarle all'ingresso. Legenda sotto la mappa. Scelta "Giochi come". | RF-03, RF-10, RF-12, RF-30…RF-35, RF-94 |
+| 7 | **Nebbia di guerra** | Tabella `zone_scoperte` e pannello delle zone del Master. Copertura opaca per i giocatori e al 55% per il Master, senza intercettare i clic. All'avvio è scoperta solo la zona d'ingresso. I poligoni delle zone non scoperte non arrivano ai giocatori. Le sovrapposizioni segrete sono servite solo a zona scoperta. | RF-20…RF-25 |
+| 8 | **Mostri** | Tabella `mostri`. Il Master li aggiunge (tipo o "Altro", quantità, zona), li sposta e li toglie con conferma nell'interfaccia. I mostri ricevono sigle numerate e restano sotto la nebbia. I giocatori ricevono i dati di un mostro solo quando la sua zona è scoperta, anche alla scoperta successiva e sulle istantanee. | RF-40…RF-44 |
+| 9 | **Dadi e storico** | Tabella `tiri`. Tiro sul server con `crypto.randomInt`. Pulsanti da d4 a d100 e 3d6, numero di dadi, modificatore e motivo. Risultato in grande, con 20 naturale e 1 naturale evidenziati. Tiri nascosti visibili solo al Master. Storico degli ultimi 40 tiri. Svuotamento con conferma in due passaggi. | RF-50…RF-63 |
+| 10 | **Narrazione e backup** | Il Master pubblica e nasconde il testo "Il Master legge". Esportazione in JSON dello stato di una partita. | RF-70, RF-95 |
+
+### Traguardo 3 — Rilascio dell'MVP
+
+| # | Step | Contenuto | Requisiti |
+| --- | --- | --- | --- |
+| 11 | **Chiedi a Claude** *(se confermato, §13)* | Endpoint lato server con chiave API nel `.env` e risposta mostrata mentre viene scritta, con "Ferma". Prompt di sistema con il vincolo dei segreti dell'avventura, limite di domande per utente, attivabile per partita. | RF-100…RF-104 |
+| 12 | **Rifinitura** | Interfaccia responsive fino a 400 px, tema chiaro/scuro con la palette e i caratteri, accessibilità (focus visibile, contrasti, riduci movimento, testi alternativi), nessun dialogo del browser, verifica che i testi degli utenti siano mostrati solo come testo. | RNF-02…RNF-09 |
+| 13 | **Collaudo e messa in linea** | Suite Playwright con i criteri della §12, giocata con più browser contemporanei (un Master, due giocatori, un non invitato). Test di sicurezza: comandi costruiti a mano da un `ROLE_PLAYER`, accesso a partite altrui, immagini segrete. Messa in linea su Debian 13 con Apache2 o nginx, systemd e MySQL 9.7 secondo la §15.5, con le configurazioni di esempio in `deploy/`. Partita di prova con il gruppo. | §12, RNF-07 |
+
+Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di un'avventura dal pannello del Master).
