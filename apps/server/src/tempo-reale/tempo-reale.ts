@@ -1,5 +1,8 @@
 import {
+  ComandoAggiungiMostri,
+  ComandoSpostaMostro,
   ComandoSpostaPedina,
+  ComandoTogliMostro,
   ComandoZona,
   type EventiDalClient,
   type EventiDalServer,
@@ -21,11 +24,14 @@ import type { RigaUtente } from '../db/schema.ts';
 import { ErroreHttp } from '../http/errori.ts';
 import { accessoPartita } from '../partite/accesso.ts';
 import { dettaglioPartita } from '../partite/partite.ts';
+import { aggiungiMostri, spostaMostro, togliMostro, togliTuttiIMostri } from '../partite/mostri.ts';
 import { impostaZona } from '../partite/nebbia.ts';
 import { riportaPedine, spostaPedina } from '../partite/pedine.ts';
 
 /** `Omit` che rispetta le unioni: toglie la chiave da ciascun membro. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+type SenzaVersione = DistributiveOmit<EventoPartita, 'versione'>;
 
 type DatiSocket = { utente: RigaUtente; tokenHash: string; partitaId: number | null };
 type SocketTavolo = Socket<EventiDalClient, EventiDalServer, Record<string, never>, DatiSocket>;
@@ -193,9 +199,15 @@ export function avviaTempoReale(
     {
       soloMaster = false,
       evento = () => ({ tipo: 'modificata' }),
+      perGiocatori,
     }: {
       soloMaster?: boolean;
-      evento?: (risultato: T) => DistributiveOmit<EventoPartita, 'versione'>;
+      evento?: (risultato: T) => SenzaVersione;
+      /**
+       * Se indicato, `evento` va solo al Master e gli altri ricevono questo (o niente, con
+       * `null`): così un evento con dati riservati non arriva mai ai giocatori.
+       */
+      perGiocatori?: (risultato: T) => SenzaVersione | null;
     } = {},
   ): Promise<T | null> {
     const esito = await db.transaction().execute(async (trx) => {
@@ -220,7 +232,17 @@ export function avviaTempoReale(
     // Chi non riceve l'evento (i giocatori, per le modifiche riservate al Master) vedrà
     // comunque un salto di versione alla prossima modifica e chiederà un'istantanea.
     const dati: EventoPartita = { ...evento(risultato), versione };
-    io.to(soloMaster ? stanzaMaster(partitaId) : stanza(partitaId)).emit('partita:evento', dati);
+    if (soloMaster || perGiocatori) {
+      io.to(stanzaMaster(partitaId)).emit('partita:evento', dati);
+      const altri = perGiocatori?.(risultato);
+      if (altri) {
+        io.to(stanza(partitaId))
+          .except(stanzaMaster(partitaId))
+          .emit('partita:evento', { ...altri, versione });
+      }
+    } else {
+      io.to(stanza(partitaId)).emit('partita:evento', dati);
+    }
     return risultato;
   }
 
@@ -328,6 +350,51 @@ export function avviaTempoReale(
         comando(socket, risposta, 'master', async (partitaId) => {
           const c = ComandoZona.parse(dati);
           await modifica(partitaId, (trx) => impostaZona(trx, partitaId, c));
+        }),
+      ),
+    );
+
+    // Mostri (RF-40…RF-44): solo il Master. I giocatori sono avvisati solo se la modifica
+    // tocca un mostro che vedono (prima o dopo); altrimenti non sanno nemmeno che è successo.
+    const seVisibile = (r: { visibile: boolean }) =>
+      r.visibile ? ({ tipo: 'modificata' } as const) : null;
+    socket.on('mostri:aggiungi', (dati, risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          const c = ComandoAggiungiMostri.parse(dati);
+          await modifica(partitaId, (trx) => aggiungiMostri(trx, partitaId, c), {
+            perGiocatori: (r) => seVisibile({ visibile: r.visibili }),
+          });
+        }),
+      ),
+    );
+    socket.on('mostro:sposta', (dati, risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          const c = ComandoSpostaMostro.parse(dati);
+          await modifica(partitaId, (trx) => spostaMostro(trx, partitaId, c), {
+            evento: () => ({ tipo: 'mostro:spostato', ...c }),
+            perGiocatori: seVisibile,
+          });
+        }),
+      ),
+    );
+    socket.on('mostro:togli', (dati, risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          const { mostroId } = ComandoTogliMostro.parse(dati);
+          await modifica(partitaId, (trx) => togliMostro(trx, partitaId, mostroId), {
+            perGiocatori: seVisibile,
+          });
+        }),
+      ),
+    );
+    socket.on('mostri:togli-tutti', (risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          await modifica(partitaId, (trx) => togliTuttiIMostri(trx, partitaId), {
+            perGiocatori: seVisibile,
+          });
         }),
       ),
     );

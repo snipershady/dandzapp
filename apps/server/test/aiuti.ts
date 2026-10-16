@@ -22,6 +22,8 @@ export type Contesto = {
 };
 
 const TABELLE = [
+  'mostri_sigle',
+  'mostri',
   'zone_scoperte',
   'inviti',
   'partecipazioni',

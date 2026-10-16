@@ -138,3 +138,65 @@ test('il Master scopre una zona e la giocatrice la vede entro 3 secondi (RF-22)'
   await expect(nebbia).toHaveCount(10, ENTRO_3_SECONDI);
   await expect.poll(() => href(irene), ENTRO_3_SECONDI).toBe(prima);
 });
+
+test('un mostro in una zona coperta compare alla giocatrice solo quando il Master la scopre (RF-42)', async ({
+  browser,
+  request,
+  page,
+}) => {
+  const { master, irene, scheda } = await preparaTavolo(browser, request, page);
+  await master.goto(scheda);
+
+  const pannello = master.getByRole('region', { name: 'Mostri' });
+  await pannello.getByLabel('Tipo').selectOption({ label: 'Scorpione gigante' });
+  await pannello.getByLabel('Quantità').selectOption('2');
+  await pannello
+    .getByLabel('Zona di comparsa')
+    .selectOption({ label: '3 · Sacrario del falco (coperta)' });
+  await pannello.getByRole('button', { name: 'Aggiungi' }).click();
+
+  await expect(master.locator('[data-mostro="Sc1"]')).toBeVisible(ENTRO_3_SECONDI);
+  await expect(master.locator('[data-mostro="Sc2"]')).toBeVisible();
+  await expect(pannello.getByRole('listitem', { name: 'Scorpione gigante Sc1' })).toContainText(
+    '(coperta)',
+  );
+  // Né sullo schermo né nei dati: la giocatrice non ha nessun mostro.
+  await expect(irene.locator('[data-mostro]')).toHaveCount(0);
+
+  await master
+    .getByRole('region', { name: 'Zone' })
+    .getByRole('checkbox', { name: '3 · Sacrario del falco' })
+    .check();
+  await expect(irene.locator('[data-mostro="Sc1"]')).toBeVisible(ENTRO_3_SECONDI);
+  await expect(irene.locator('[data-mostro]')).toHaveCount(2);
+  // La giocatrice non può spostarli: per lei sono immagini, non pulsanti.
+  await expect(irene.getByRole('button', { name: /Sc1/ })).toHaveCount(0);
+
+  // Il Master li toglie tutti, con conferma nella pagina (RF-43).
+  await pannello.getByRole('button', { name: 'Togli tutti i mostri' }).click();
+  await pannello.getByRole('button', { name: 'Togli tutti', exact: true }).click();
+  await expect(irene.locator('[data-mostro]')).toHaveCount(0, ENTRO_3_SECONDI);
+  await expect(master.locator('[data-mostro]')).toHaveCount(0);
+});
+
+test('il Master trascina un mostro (RF-43)', async ({ browser, request }) => {
+  const { master, scheda } = await preparaTavolo(browser, request);
+  await master.goto(scheda);
+  const pannello = master.getByRole('region', { name: 'Mostri' });
+  await pannello.getByLabel('Tipo').selectOption({ label: 'Altro…' });
+  await pannello.getByLabel('Nome del mostro').fill('Bandito');
+  await pannello
+    .getByLabel('Zona di comparsa')
+    .selectOption({ label: "1 · Sala d'ingresso (coperta)" });
+  await pannello.getByRole('button', { name: 'Aggiungi' }).click();
+
+  const bandito = master.locator('[data-mostro="Ba1"]');
+  await expect(bandito).toBeVisible(ENTRO_3_SECONDI);
+  const da = await posizione(bandito);
+  await bandito.scrollIntoViewIfNeeded();
+  await trascina(master, await suSchermo(master, da), await suSchermo(master, { x: 600, y: 650 }));
+  await vicinaA(bandito, { x: 600, y: 650 });
+  // Dopo un nuovo caricamento la posizione è quella salvata.
+  await master.reload();
+  await vicinaA(master.locator('[data-mostro="Ba1"]'), { x: 600, y: 650 });
+});

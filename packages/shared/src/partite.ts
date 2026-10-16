@@ -198,6 +198,16 @@ export const ZonaPartita = z.object({
 });
 export type ZonaPartita = z.infer<typeof ZonaPartita>;
 
+/** Mostro sul tavolo (RF-41): rombo rosso con sigla numerata. */
+export const Mostro = z.object({
+  id,
+  nome: z.string(),
+  sigla: z.string(),
+  x: z.number(),
+  y: z.number(),
+});
+export type Mostro = z.infer<typeof Mostro>;
+
 export const DettaglioPartita = z.object({
   partita: RiepilogoPartita,
   /** Versione dello stato di gioco: cresce a ogni modifica (§15.3). */
@@ -209,5 +219,12 @@ export const DettaglioPartita = z.object({
   inviti: z.array(Invito).optional(),
   /** Solo per il Master: tutte le zone, scoperte e no (RF-21, RF-22). */
   zone: z.array(ZonaPartita).optional(),
+  /**
+   * Mostri: il Master li riceve tutti, gli altri solo quelli dentro una zona scoperta
+   * (RF-42, RF-44).
+   */
+  mostri: z.array(Mostro),
+  /** Solo per il Master: i tipi di mostro previsti dall'avventura (RF-40). */
+  tipiMostro: z.array(z.object({ nome: z.string(), sigla: z.string() })).optional(),
 });
 export type DettaglioPartita = z.infer<typeof DettaglioPartita>;

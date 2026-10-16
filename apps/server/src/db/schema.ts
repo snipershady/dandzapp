@@ -20,6 +20,8 @@ export type Database = {
   partecipazioni: TabellaPartecipazioni;
   inviti: TabellaInviti;
   zone_scoperte: TabellaZoneScoperte;
+  mostri: TabellaMostri;
+  mostri_sigle: TabellaMostriSigle;
 };
 
 /** Colonna con valore predefinito: facoltativa in inserimento. */
@@ -122,4 +124,22 @@ export type RigaInvito = Selectable<TabellaInviti>;
 export type TabellaZoneScoperte = {
   partita_id: number;
   zona_id: string;
+};
+
+export type TabellaMostri = {
+  id: Generated<number>;
+  partita_id: number;
+  nome: string;
+  sigla: string;
+  x: number;
+  y: number;
+  creato_il: ConDefault<Date>;
+};
+export type RigaMostro = Selectable<TabellaMostri>;
+
+/** Ultimo numero usato per ogni prefisso di sigla, per partita. */
+export type TabellaMostriSigle = {
+  partita_id: number;
+  prefisso: string;
+  ultimo: number;
 };

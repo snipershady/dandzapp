@@ -1,5 +1,7 @@
 import {
   DettaglioPartita,
+  type ComandoAggiungiMostri,
+  type ComandoSpostaMostro,
   type ComandoSpostaPedina,
   type ComandoZona,
   type EventiDalClient,
@@ -123,6 +125,23 @@ export class Collegamento {
     return this.#comando((s, r) => s.emit('zona:imposta', comando, r));
   }
 
+  /** Solo Master: mostri (RF-40…RF-43). */
+  aggiungiMostri(comando: ComandoAggiungiMostri): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('mostri:aggiungi', comando, r));
+  }
+
+  spostaMostro(comando: ComandoSpostaMostro): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('mostro:sposta', comando, r));
+  }
+
+  togliMostro(mostroId: number): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('mostro:togli', { mostroId }, r));
+  }
+
+  togliTuttiIMostri(): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('mostri:togli-tutti', r));
+  }
+
   #comando(
     invia: (
       socket: Socket<EventiDalServer, EventiDalClient>,
@@ -157,15 +176,16 @@ export class Collegamento {
       void this.#riallinea();
       return;
     }
-    if (evento.tipo === 'pedina:spostata') {
-      const pg = this.dettaglio.personaggi.find((p) => p.id === evento.personaggioId);
-      if (!pg) {
-        void this.#riallinea();
-        return;
-      }
-      pg.x = evento.x;
-      pg.y = evento.y;
+    const segnalino =
+      evento.tipo === 'pedina:spostata'
+        ? this.dettaglio.personaggi.find((p) => p.id === evento.personaggioId)
+        : this.dettaglio.mostri.find((m) => m.id === evento.mostroId);
+    if (!segnalino) {
+      void this.#riallinea();
+      return;
     }
+    segnalino.x = evento.x;
+    segnalino.y = evento.y;
     this.dettaglio.versione = evento.versione;
     this.ultimoAggiornamento = Date.now();
   }

@@ -10,6 +10,7 @@
   import AlTavolo from '#lib/tavolo/AlTavolo.svelte';
   import { Collegamento } from '#lib/tavolo/collegamento.svelte.ts';
   import Mappa from '#lib/tavolo/Mappa.svelte';
+  import PannelloMostri from '#lib/tavolo/PannelloMostri.svelte';
   import PannelloZone from '#lib/tavolo/PannelloZone.svelte';
   import RigaStato from '#lib/tavolo/RigaStato.svelte';
   import { conPunti } from '#lib/testo.ts';
@@ -24,7 +25,9 @@
     return () => collegamento.ferma();
   });
 
-  const { partita, mappa, personaggi, partecipanti, zone } = $derived(collegamento.dettaglio);
+  const { partita, mappa, personaggi, partecipanti, zone, mostri, tipiMostro } = $derived(
+    collegamento.dettaglio,
+  );
   const nomeDi = (id: number | null) => partecipanti.find((p) => p.utenteId === id)?.nome;
   let errore = $state<string | null>(null);
 
@@ -124,6 +127,9 @@
         {mappa}
         {personaggi}
         {zone}
+        {mostri}
+        puoMuovereMostri={partita.mioRuolo === 'master' && partita.stato === 'attiva'}
+        spostaMostro={(c) => collegamento.spostaMostro(c)}
         {mioPersonaggioId}
         {puoMuovere}
         sposta={(c) => collegamento.spostaPedina(c)}
@@ -139,6 +145,16 @@
           {zone}
           disabilitato={partita.stato !== 'attiva'}
           imposta={(c) => collegamento.impostaZona(c)}
+          onerrore={(m) => (errore = m)}
+        />
+        <PannelloMostri
+          {mostri}
+          tipi={tipiMostro ?? []}
+          {zone}
+          disabilitato={partita.stato !== 'attiva'}
+          aggiungi={(c) => collegamento.aggiungiMostri(c)}
+          togli={(id) => collegamento.togliMostro(id)}
+          togliTutti={() => collegamento.togliTuttiIMostri()}
           onerrore={(m) => (errore = m)}
         />
       {/if}

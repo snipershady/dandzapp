@@ -461,3 +461,119 @@ describe('nebbia di guerra (RF-22)', () => {
     expect(await scoperte()).toEqual(['ingresso']);
   });
 });
+
+describe('mostri (RF-40…RF-44)', () => {
+  type Cmd = Parameters<EventiDalClient['mostri:aggiungi']>[0];
+  const aggiungi = (s: Client, c: Cmd) =>
+    new Promise<RispostaComando>((ok) => s.emit('mostri:aggiungi', c, ok));
+  const spostaM = (s: Client, mostroId: number, x: number, y: number) =>
+    new Promise<RispostaComando>((ok) => s.emit('mostro:sposta', { mostroId, x, y }, ok));
+  const togli = (s: Client, mostroId: number) =>
+    new Promise<RispostaComando>((ok) => s.emit('mostro:togli', { mostroId }, ok));
+  const togliTutti = (s: Client) =>
+    new Promise<RispostaComando>((ok) => s.emit('mostri:togli-tutti', ok));
+  const istantanea = async (s: Client) => {
+    const r = await new Promise<RispostaIstantanea>((ok) => s.emit('partita:istantanea', ok));
+    if (!r.ok) throw new Error(r.errore);
+    return r.istantanea.dettaglio;
+  };
+  const imposta = (s: Client, zonaId: string, scoperta: boolean) =>
+    new Promise<RispostaComando>((ok) => s.emit('zona:imposta', { zonaId, scoperta }, ok));
+
+  async function tavolo() {
+    const irene = await giocatore('irene@esempio.it');
+    const [sm, si] = [collega(master), collega(irene.token)];
+    await entra(sm);
+    await entra(si);
+    return { sm, si };
+  }
+
+  it('il Master li aggiunge con sigle numerate che proseguono', async () => {
+    const { sm } = await tavolo();
+    expect(await aggiungi(sm, { tipo: 'St', quantita: 3, zonaId: 'sala3' })).toEqual({ ok: true });
+    const prima = (await istantanea(sm)).mostri;
+    expect(prima.map((m) => m.sigla)).toEqual(['St1', 'St2', 'St3']);
+    expect(prima.every((m) => m.nome === 'Stirge')).toBe(true);
+
+    // Tolto l'ultimo, i nuovi non riusano la sua sigla.
+    await togli(sm, prima[2]?.id ?? 0);
+    await aggiungi(sm, { tipo: 'St', quantita: 2, zonaId: 'sala3' });
+    await aggiungi(sm, { altro: 'Bandito', quantita: 1, zonaId: 'sala1' });
+    const dopo = await istantanea(sm);
+    expect(dopo.mostri.map((m) => m.sigla)).toEqual(['St1', 'St2', 'St4', 'St5', 'Ba1']);
+    expect(dopo.tipiMostro?.map((t) => t.sigla)).toEqual(['Sc', 'Sp', 'St', 'Ga']);
+  });
+
+  it('i giocatori non ricevono i mostri delle zone coperte, né eventi su di loro', async () => {
+    const { sm, si } = await tavolo();
+    const eventiIrene = registro(si, 'partita:evento');
+    await aggiungi(sm, { tipo: 'Sc', quantita: 2, zonaId: 'sala3' });
+    const [sc1] = (await istantanea(sm)).mostri;
+    await spostaM(sm, sc1?.id ?? 0, 400, 100);
+    await attendi(200);
+    expect(eventiIrene).toEqual([]);
+    const vista = await istantanea(si);
+    expect(vista.mostri).toEqual([]);
+    expect(vista.tipiMostro).toBeUndefined();
+
+    // Scoperta la zona, i mostri arrivano con l'istantanea.
+    await imposta(sm, 'sala3', true);
+    expect((await istantanea(si)).mostri.map((m) => m.sigla)).toEqual(['Sc1', 'Sc2']);
+
+    // Un mostro portato nella roccia sparisce per i giocatori (e loro se ne accorgono).
+    const evento = prossimo(si, 'partita:evento');
+    await spostaM(sm, sc1?.id ?? 0, 100, 100);
+    expect((await evento)[0].tipo).toBe('modificata');
+    expect((await istantanea(si)).mostri.map((m) => m.sigla)).toEqual(['Sc2']);
+  });
+
+  it('il Master riceve la posizione salvata con un evento', async () => {
+    const { sm } = await tavolo();
+    await aggiungi(sm, { tipo: 'Ga', quantita: 1, zonaId: 'sala1' });
+    const [ga] = (await istantanea(sm)).mostri;
+    const evento = prossimo(sm, 'partita:evento');
+    await spostaM(sm, ga?.id ?? 0, 500, 500);
+    expect((await evento)[0]).toMatchObject({
+      tipo: 'mostro:spostato',
+      mostroId: ga?.id,
+      x: 500,
+      y: 500,
+    });
+  });
+
+  it('il Master li toglie tutti', async () => {
+    const { sm } = await tavolo();
+    await aggiungi(sm, { tipo: 'Sp', quantita: 4, zonaId: 'ingresso' });
+    expect(await togliTutti(sm)).toEqual({ ok: true });
+    expect((await istantanea(sm)).mostri).toEqual([]);
+  });
+
+  it('i giocatori non toccano i mostri; tipi, zone e quantità sono controllati', async () => {
+    const { sm, si } = await tavolo();
+    await aggiungi(sm, { tipo: 'St', quantita: 1, zonaId: 'ingresso' });
+    const [st] = (await istantanea(sm)).mostri;
+    const vietato = { ok: false, errore: 'Solo il Master della partita può farlo' };
+    expect(await aggiungi(si, { tipo: 'St', quantita: 1, zonaId: 'ingresso' })).toEqual(vietato);
+    expect(await spostaM(si, st?.id ?? 0, 10, 10)).toEqual(vietato);
+    expect(await togli(si, st?.id ?? 0)).toEqual(vietato);
+    expect(await togliTutti(si)).toEqual(vietato);
+
+    const nonValido = { ok: false, errore: 'Comando non valido' };
+    expect(await aggiungi(sm, { tipo: 'St', quantita: 13, zonaId: 'ingresso' })).toEqual(nonValido);
+    expect(await aggiungi(sm, { quantita: 1, zonaId: 'ingresso' })).toEqual(nonValido);
+    expect(await aggiungi(sm, { tipo: 'Dr', quantita: 1, zonaId: 'ingresso' })).toEqual({
+      ok: false,
+      errore: 'Tipo di mostro inesistente',
+    });
+    expect(await aggiungi(sm, { tipo: 'St', quantita: 1, zonaId: 'boh' })).toEqual({
+      ok: false,
+      errore: 'Zona inesistente',
+    });
+    expect(await spostaM(sm, st?.id ?? 0, 99999, 10)).toEqual({
+      ok: false,
+      errore: 'Il mostro deve restare sulla mappa',
+    });
+    expect(await togli(sm, 999999)).toEqual({ ok: false, errore: 'Mostro non trovato' });
+    expect((await istantanea(sm)).mostri).toHaveLength(1);
+  });
+});

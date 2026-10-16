@@ -432,7 +432,9 @@ Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il
     - usa le stanze `utente:{id}` e `sessione:{hash}` per chiudere i collegamenti all'uscita o alla disattivazione dell'account.
   - **Rotte:** dopo ogni modifica chiamano `tempoReale.notifica(partitaId)`, che incrementa `versione` in una transazione e avvisa la stanza. Con `{ soloMaster: true }` avvisa solo il Master (es. gli inviti).
   - **Eventi:** `modificata` dice solo "riallineati" e il client chiede l'istantanea. Gli eventi con i dati (dallo step 6: `pedina:spostata`) il client li applica solo se la versione è la successiva attesa; con un salto chiede l'istantanea.
-  - **Comandi di gioco** (`pedina:sposta`, `pedine:riporta`, `zona:imposta`) arrivano via Socket.IO e passano da `comando()` in `tempo-reale.ts`, che a ogni comando ricontrolla partecipazione, ruolo (gli osservatori sono in sola lettura) e partita non archiviata. Rispondono con un *ack* `{ ok } | { ok: false, errore }`.
+  - **Comandi di gioco** (`pedina:sposta`, `pedine:riporta`, `zona:imposta`, `mostri:aggiungi`, `mostro:sposta`, `mostro:togli`, `mostri:togli-tutti`) arrivano via Socket.IO e passano da `comando()` in `tempo-reale.ts`, che a ogni comando ricontrolla partecipazione, ruolo (gli osservatori sono in sola lettura) e partita non archiviata. Rispondono con un *ack* `{ ok } | { ok: false, errore }`.
+  - **Eventi riservati (step 8):** `modifica()` accetta `perGiocatori`. In quel caso `evento` va solo alla stanza del Master, e gli altri ricevono quello che restituisce `perGiocatori`, oppure niente con `null` (`io.to(stanza).except(stanzaMaster)`). Per i mostri: il Master riceve `mostro:spostato` con i dati, i giocatori ricevono `modificata` solo se il mostro era visibile prima o lo è dopo. Le modifiche ai mostri nascosti non lasciano traccia nemmeno nei tempi degli eventi; i giocatori vedranno solo un salto di versione alla modifica successiva.
+  - **Visibilità dei mostri (RF-44):** un giocatore vede un mostro solo se il suo centro sta in una zona scoperta (`zonaDi` in `packages/shared/src/geometria.ts`, punto nel poligono); fuori da ogni zona resta nascosto (decisione del 16/10/2026).
   - **Atomicità:** un comando con dati usa `modifica()`. La scrittura e l'incremento di `versione` avvengono nella stessa transazione, con la riga della partita bloccata (`FOR UPDATE`), così i dati di un evento sono esattamente quelli della sua versione. `notifica()` delle rotte REST resta separata dalla scrittura: va bene perché emette solo `modificata`.
   - **Client** (`apps/web/src/lib/tavolo/collegamento.svelte.ts`):
     - ricontrolla la versione ogni 15 secondi;
@@ -455,7 +457,8 @@ Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di 
 | `inviti` | `id`, `partita_id`, `email`, `ruolo`, `personaggio_id`, `token_hash` (unico), `scade_il` (7 giorni), `accettato_il`, `accettato_da`, `creato_il`. Un nuovo invito alla stessa email sostituisce quello in sospeso |
 | `personaggi` | `id`, `partita_id`, `nome` e `sigla` (unici nella partita), `classe`, `colore`, `utente_id` (giocatore assegnato, facoltativo; `NULL` se lascia la partita o diventa osservatore), `posto` (indice in `partenze` dell'avventura), `x`, `y` |
 | `zone_scoperte` | PK(`partita_id`, `zona_id`). Creata nello step 6 e popolata con le `zoneIniziali` alla creazione della partita |
-| `mostri` | `id`, `partita_id`, `nome`, `sigla`, `x`, `y` |
+| `mostri` | `id`, `partita_id`, `nome`, `sigla` (unica nella partita), `x`, `y`, `creato_il` |
+| `mostri_sigle` | PK(`partita_id`, `prefisso`), `ultimo`: le sigle proseguono (St4, St5…) anche dopo aver tolto dei mostri, e una sigla non indica mai due mostri diversi (decisione del 16/10/2026) |
 | `tiri` | `id`, `partita_id`, `utente_id`, `personaggio_id`, `motivo`, `n_dadi`, `facce`, `modificatore`, `risultati` JSON, `totale`, `nascosto`, `creato_il`; indice (`partita_id`, `creato_il`) |
 
 Ogni query sui dati di gioco filtra per `partita_id`, e l'accesso alla partita è verificato prima (`partecipazioni` oppure `partite.master_id`).
@@ -542,7 +545,7 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 | 5 ✔ | **Tempo reale e presenza** | Socket.IO autenticato con il cookie di sessione. Ingresso nelle rooms `partita:{id}` e `partita:{id}:master` dopo la verifica della partecipazione. Contatore `versione`, istantanea filtrata con `vistaMaster` / `vistaGiocatore`, risincronizzazione alla riconnessione e su salto di versione. Riquadro "Al tavolo", riga di stato del collegamento con "Aggiorna ora". | RF-80, RF-81, RF-90, RF-91, RF-92, RF-93 |
 | 6 ✔ | **Mappa e pedine dei PG** | Mappa in SVG con l'immagine dell'avventura, griglia, scala grafica e nord, adattata alla larghezza dello schermo. Pedine tonde con sigla, colore e nome al passaggio del mouse; la propria è evidenziata. Trascinamento con mouse e dito, salvato al rilascio, senza "salti" (RF-94). Il Master può riportarle all'ingresso. Legenda sotto la mappa. Scelta "Giochi come". | RF-03, RF-10, RF-12, RF-30…RF-35, RF-94 |
 | 7 ✔ | **Nebbia di guerra** | Tabella `zone_scoperte` e pannello delle zone del Master. Copertura opaca per i giocatori e al 55% per il Master, senza intercettare i clic. All'avvio è scoperta solo la zona d'ingresso. I poligoni delle zone non scoperte non arrivano ai giocatori. Le sovrapposizioni segrete sono servite solo a zona scoperta. | RF-20…RF-25 |
-| 8 | **Mostri** | Tabella `mostri`. Il Master li aggiunge (tipo o "Altro", quantità, zona), li sposta e li toglie con conferma nell'interfaccia. I mostri ricevono sigle numerate e restano sotto la nebbia. I giocatori ricevono i dati di un mostro solo quando la sua zona è scoperta, anche alla scoperta successiva e sulle istantanee. | RF-40…RF-44 |
+| 8 ✔ | **Mostri** | Tabella `mostri`. Il Master li aggiunge (tipo o "Altro", quantità, zona), li sposta e li toglie con conferma nell'interfaccia. I mostri ricevono sigle numerate e restano sotto la nebbia. I giocatori ricevono i dati di un mostro solo quando la sua zona è scoperta, anche alla scoperta successiva e sulle istantanee. | RF-40…RF-44 |
 | 9 | **Dadi e storico** | Tabella `tiri`. Tiro sul server con `crypto.randomInt`. Pulsanti da d4 a d100 e 3d6, numero di dadi, modificatore e motivo. Risultato in grande, con 20 naturale e 1 naturale evidenziati. Tiri nascosti visibili solo al Master. Storico degli ultimi 40 tiri. Svuotamento con conferma in due passaggi. | RF-50…RF-63 |
 | 10 | **Narrazione e backup** | Il Master pubblica e nasconde il testo "Il Master legge". Esportazione in JSON dello stato di una partita. | RF-70, RF-95 |
 
@@ -562,7 +565,7 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 
 > Sezione di passaggio tra una sessione di lavoro e l'altra. **All'inizio di una nuova sessione, Claude legge questa sezione, esegue i controlli di "Come ripartire" e pone all'utente le domande elencate sotto prima di scrivere codice.** Le voci risolte vanno tolte da qui e riportate nelle sezioni giuste del documento.
 
-**Ultimo aggiornamento:** 16/10/2026, fine sessione. Si riprende con lo **step 8**.
+**Ultimo aggiornamento:** 16/10/2026, fine sessione. Si riprende con lo **step 9**.
 
 ### Fatto
 
@@ -575,9 +578,15 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 | 4 | Partite, PG, partecipanti, inviti, "Le mie partite", gestione | "step 4" |
 | 5 | Tempo reale (Socket.IO), presenza "Al tavolo", riga di stato, ripiego, avviso di sola lettura | "step 5 completato" |
 | 6 | Mappa composta dal server (`sharp`), tabella `zone_scoperte`, tavolo SVG, pedine trascinabili (mouse, dito, frecce), evento `pedina:spostata`, "Giochi come", riporta all'ingresso, legenda | "step 6" |
-| 7 | Comando `zona:imposta` (solo Master), pannello "Zone", nebbia del Master al 55% senza intercettare i clic, zone e poligoni solo nell'istantanea del Master, segreti incollati nella mappa a zona scoperta | **da committare** (verificare con `git status`) |
+| 7 | Comando `zona:imposta` (solo Master), pannello "Zone", nebbia del Master al 55% senza intercettare i clic, zone e poligoni solo nell'istantanea del Master, segreti incollati nella mappa a zona scoperta | "Step 7 completo" |
+| 8 | Tabelle `mostri` e `mostri_sigle`, comandi dei mostri (solo Master), pannello "Mostri" (tipo o Altro, quantità, zona, togli uno o tutti), rombi rossi sotto la nebbia e trascinabili, filtro per zona scoperta | **da committare** (verificare con `git status`) |
 
-Ultima verifica: `npm run verifica` verde (97 test Vitest), `npm run test:e2e` verde (42 test Playwright su desktop e telefono). La CI gira su GitHub (step 4 e 5 verdi) e in locale con act (§15.6).
+Ultima verifica: `npm run verifica` verde (107 test Vitest), `npm run test:e2e` verde (46 test Playwright su desktop e telefono).
+
+**Da sapere sullo step 8:**
+- I mostri compaiono raggruppati attorno al `centro` della zona, nei punti di una griglia di 0,9 quadretti che cadono **dentro** il poligono (la griglia si infittisce se la zona è piccola), così anche in un corridoio stretto restano visibili ai giocatori.
+- "Altro" usa come prefisso le prime due lettere del nome ("Bandito" → Ba1). Se coincide con un tipo dell'avventura (es. "Stregone" → St), la numerazione è condivisa: le sigle restano uniche.
+- Al massimo 100 mostri per partita (`MAX_MOSTRI`). La CI gira su GitHub (step 4 e 5 verdi) e in locale con act (§15.6).
 
 **Da sapere sullo step 7:**
 - Al Master la nebbia arriva come poligoni (`dettaglio.zone`, solo per lui). I giocatori non ricevono nessuna zona: la loro mappa cambia `chiave` e il browser scarica la nuova immagine prima di mostrarla, senza lampi di nebbia.
@@ -590,44 +599,43 @@ Ultima verifica: `npm run verifica` verde (97 test Vitest), `npm run test:e2e` v
 - La scala grafica e il nord sono sotto la mappa, in HTML, perché quelli disegnati nell'immagine cadono fuori dalle zone scoperte. Il Master li vede due volte.
 
 **Database:**
-- **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_1600_zone_scoperte` (lo step 7 non ne aggiunge), Sessione 0 importata, immagini in `dati/`. Primo Master creato il 16/10/2026 con `utente:crea-master`. Con `SMTP_HOST` vuoto l'email non parte: il link per la password è stato stampato a terminale (vale 7 giorni; in alternativa si usa "Password dimenticata", che stampa il link nel log del server);
+- **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_1800_mostri`, Sessione 0 importata, immagini in `dati/`. Primo Master creato il 16/10/2026 con `utente:crea-master`. Con `SMTP_HOST` vuoto l'email non parte: il link per la password è stato stampato a terminale (vale 7 giorni; in alternativa si usa "Password dimenticata", che stampa il link nel log del server);
 - **test** `dandzapp_test` su `127.0.0.1` (`DB_TEST_*`): lo usano Vitest e Playwright, che ne cancellano i dati.
 
 ### Come ripartire
 
-1. `git status`: se lo step 7 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
+1. `git status`: se lo step 8 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
 2. `npm install` (se è cambiato `package-lock.json`), poi `npm run verifica` e `npm run test:e2e`: devono essere verdi prima di toccare codice.
 3. `npm run db:migra` per allineare lo staging, se nel frattempo sono arrivate migrazioni.
 4. Per provare a mano: `npm run dev` → http://localhost:5173.
 
 ### Da chiedere all'utente all'inizio della prossima sessione
 
-1. **Mostri con lo stesso tipo in più ondate.** Se il Master aggiunge 3 Stirge e più tardi altre 2, le sigle proseguono (St4, St5) o ricominciano? Proposta: proseguono, così una sigla non indica mai due mostri diversi nella stessa partita.
-2. **Mostri fuori dalle zone.** Un mostro trascinato dal Master fuori da ogni zona (es. nella roccia) i giocatori lo vedono o no? Proposta: no. Un mostro è visibile solo se il suo centro sta in una zona scoperta (RF-42, RF-44).
+1. **Quanto storico tiri conservare** (§13, domanda aperta)? Proposta: in tabella si tengono tutti i tiri della partita (servono per il backup dello step 10), e il tavolo ne mostra gli ultimi 40 (RF-60). "Svuota storico" (RF-62) li cancella davvero.
+2. **Tiri di chi non ha scelto un PG.** Un giocatore senza "Giochi come" può tirare? Proposta: sì, e nello storico compare solo il nome dell'account.
 
-### Prossimo passo: step 8, i mostri
+### Prossimo passo: step 9, dadi e storico
 
-Obiettivo (RF-40…RF-44): il Master piazza e muove i mostri, e i giocatori li vedono solo nelle zone scoperte.
+Obiettivo (RF-50…RF-63).
 
 Proposta di lavoro, da confermare con l'utente all'inizio:
 
-1. **Migrazione `mostri`:** `id`, `partita_id`, `nome`, `sigla` (unica nella partita), `x`, `y`.
-2. **Comandi del Master** (`comando()` + `modifica()`):
-   - `mostri:aggiungi` { tipo dell'avventura oppure nome libero con sigla, quantità 1–12, zona }: i mostri compaiono raggruppati attorno al `centro` della zona (RF-41);
-   - `mostro:sposta`;
-   - `mostro:togli`;
-   - `mostri:togli-tutti` (con conferma nella pagina).
-3. **Visibilità (RF-44):** una funzione `zonaDi(punto)` (punto nel poligono, lato server) decide in quale zona sta un mostro.
-   - L'istantanea dei giocatori contiene solo i mostri nelle zone scoperte.
-   - Gli eventi con i dati dei mostri vanno solo alla stanza del Master; ai giocatori arriva `modificata`, e la loro nuova istantanea è già filtrata.
-   - Lo spostamento di un mostro **visibile** sarebbe comodo in diretta, ma non deve rivelare nulla: per ora `modificata` a tutti, da rivedere se si nota lentezza.
-4. **Interfaccia:**
-   - rombi rossi con sigla, sotto la nebbia del Master (RF-42) e sotto le pedine dei PG;
-   - il Master li trascina con lo stesso meccanismo delle pedine;
-   - modulo "Aggiungi mostri" (tipo / Altro, quantità, zona) nel pannello del Master;
-   - "togli" uno per uno e "togli tutti", con conferma nella pagina.
-5. **Test:**
-   - Vitest: un mostro in una zona coperta non compare nell'istantanea né negli eventi ricevuti dal giocatore; compare quando la zona viene scoperta; un giocatore non può aggiungere, spostare o togliere mostri;
-   - Playwright: il Master piazza un mostro in una zona coperta, il giocatore non lo vede, il Master scopre la zona e il giocatore lo vede entro 3 secondi.
+1. **Migrazione `tiri`** come in §15.4, con indice (`partita_id`, `creato_il`).
+2. **Comando `dadi:tira`** { facce ∈ 4, 6, 8, 10, 12, 20, 100; numero 1–20; modificatore −20…+50; motivo ≤ 60 caratteri; nascosto }.
+   - I dadi si tirano sul server con `crypto.randomInt` (RF-52).
+   - Il personaggio è quello di "Giochi come", letto dal server e non dal client (RF-63). Gli osservatori non tirano; il tiro nascosto è solo del Master (RF-54).
+   - 3d6 è una scorciatoia del client.
+3. **Eventi:**
+   - un tiro pubblico arriva a tutti con i dati (`dado:tirato`), così compare subito senza istantanea;
+   - un tiro nascosto arriva solo alla stanza del Master, con `perGiocatori: () => null`.
+4. **Istantanea:** gli ultimi 40 tiri. Il Master vede anche i propri tiri nascosti, mescolati in ordine di tempo (RF-61); i giocatori nessun tiro nascosto.
+5. **Svuota storico** (solo Master, RF-62), con `PulsanteConferma`.
+6. **Interfaccia:**
+   - pulsanti dei dadi e campi numero, modificatore e motivo;
+   - risultato in grande ("1d20+2 → 16"), con il 20 naturale in verde e l'1 naturale in corniola (RF-53), su un d20 singolo;
+   - storico con personaggio, account, motivo, formula, risultati dei singoli dadi, totale e ora.
+7. **Test:**
+   - Vitest: i risultati stanno nell'intervallo giusto, e un test statistico leggero su molti tiri; un tiro nascosto non arriva ai giocatori, né nell'evento né nell'istantanea; un osservatore non tira; un client non può imporre risultati o personaggio;
+   - Playwright: un tiro compare nello storico dell'altro browser entro 3 secondi; il tiro nascosto del Master non compare alla giocatrice.
 
-Dopo lo step 8: step 9 (dadi), 10 (narrazione e backup), poi 12–13 (rifinitura, collaudo e messa in linea).
+Dopo lo step 9: step 10 (narrazione e backup), poi 12–13 (rifinitura, collaudo e messa in linea).

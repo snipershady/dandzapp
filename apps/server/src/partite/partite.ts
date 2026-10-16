@@ -9,6 +9,7 @@ import type { Db } from '../db/database.ts';
 import { ErroreHttp } from '../http/errori.ts';
 import { elencaInviti } from './inviti.ts';
 import { infoMappa } from './mappa.ts';
+import { elencaMostri, tipiMostro } from './mostri.ts';
 import { zoneDelMaster } from './nebbia.ts';
 import { elencaPartecipanti } from './partecipanti.ts';
 import { elencaPersonaggi } from './personaggi.ts';
@@ -105,13 +106,16 @@ export async function dettaglioPartita(
     .where('partite.id', '=', partitaId)
     .executeTakeFirstOrThrow();
   const master = ruolo === 'master';
-  const [mappa, personaggi, partecipanti, inviti, zone] = await Promise.all([
+  const [mappa, personaggi, partecipanti, inviti, zone, mostri, tipi] = await Promise.all([
     infoMappa(db, partitaId, ruolo),
     elencaPersonaggi(db, partitaId),
     elencaPartecipanti(db, partitaId),
     master ? elencaInviti(db, partitaId, new Date()) : undefined,
     // Le zone (e i loro poligoni) sono uno spoiler: solo per il Master (§15.3).
     master ? zoneDelMaster(db, partitaId) : undefined,
+    // Ai giocatori solo i mostri nelle zone scoperte (RF-44).
+    elencaMostri(db, partitaId, ruolo),
+    master ? tipiMostro(db, partitaId) : undefined,
   ]);
   return {
     partita: aRiepilogo(riepilogo, ruolo),
@@ -121,6 +125,8 @@ export async function dettaglioPartita(
     partecipanti,
     ...(inviti ? { inviti } : {}),
     ...(zone ? { zone } : {}),
+    mostri,
+    ...(tipi ? { tipiMostro: tipi } : {}),
   };
 }
 
