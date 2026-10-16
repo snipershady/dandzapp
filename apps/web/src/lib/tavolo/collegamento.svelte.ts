@@ -1,6 +1,7 @@
 import {
   DettaglioPartita,
   type ComandoSpostaPedina,
+  type ComandoZona,
   type EventiDalClient,
   type EventiDalServer,
   type EventoPartita,
@@ -115,6 +116,11 @@ export class Collegamento {
   /** Solo Master: riporta le pedine ai posti di partenza (RF-34). */
   riportaPedine(): Promise<RispostaComando> {
     return this.#comando((s, r) => s.emit('pedine:riporta', r));
+  }
+
+  /** Solo Master: scopre o ricopre una zona della nebbia (RF-22). */
+  impostaZona(comando: ComandoZona): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('zona:imposta', comando, r));
   }
 
   #comando(

@@ -1,5 +1,6 @@
 import {
   ComandoSpostaPedina,
+  ComandoZona,
   type EventiDalClient,
   type EventiDalServer,
   type EventoPartita,
@@ -20,6 +21,7 @@ import type { RigaUtente } from '../db/schema.ts';
 import { ErroreHttp } from '../http/errori.ts';
 import { accessoPartita } from '../partite/accesso.ts';
 import { dettaglioPartita } from '../partite/partite.ts';
+import { impostaZona } from '../partite/nebbia.ts';
 import { riportaPedine, spostaPedina } from '../partite/pedine.ts';
 
 /** `Omit` che rispetta le unioni: toglie la chiave da ciascun membro. */
@@ -315,6 +317,17 @@ export function avviaTempoReale(
       inSicurezza(
         comando(socket, risposta, 'master', async (partitaId) => {
           await modifica(partitaId, (trx) => riportaPedine(trx, partitaId));
+        }),
+      ),
+    );
+
+    // Nebbia (RF-22): solo il Master. Tutti si riallineano: ai giocatori arriva una mappa
+    // con una nuova chiave, al Master lo stato aggiornato delle zone.
+    socket.on('zona:imposta', (dati, risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          const c = ComandoZona.parse(dati);
+          await modifica(partitaId, (trx) => impostaZona(trx, partitaId, c));
         }),
       ),
     );

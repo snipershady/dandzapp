@@ -10,6 +10,7 @@
   import AlTavolo from '#lib/tavolo/AlTavolo.svelte';
   import { Collegamento } from '#lib/tavolo/collegamento.svelte.ts';
   import Mappa from '#lib/tavolo/Mappa.svelte';
+  import PannelloZone from '#lib/tavolo/PannelloZone.svelte';
   import RigaStato from '#lib/tavolo/RigaStato.svelte';
   import { conPunti } from '#lib/testo.ts';
   import type { PageProps } from './$types';
@@ -23,7 +24,7 @@
     return () => collegamento.ferma();
   });
 
-  const { partita, mappa, personaggi, partecipanti } = $derived(collegamento.dettaglio);
+  const { partita, mappa, personaggi, partecipanti, zone } = $derived(collegamento.dettaglio);
   const nomeDi = (id: number | null) => partecipanti.find((p) => p.utenteId === id)?.nome;
   let errore = $state<string | null>(null);
 
@@ -122,6 +123,7 @@
         partitaId={partita.id}
         {mappa}
         {personaggi}
+        {zone}
         {mioPersonaggioId}
         {puoMuovere}
         sposta={(c) => collegamento.spostaPedina(c)}
@@ -132,6 +134,14 @@
     <RigaStato {collegamento} ruolo={partita.mioRuolo} />
 
     <div class="colonne">
+      {#if zone}
+        <PannelloZone
+          {zone}
+          disabilitato={partita.stato !== 'attiva'}
+          imposta={(c) => collegamento.impostaZona(c)}
+          onerrore={(m) => (errore = m)}
+        />
+      {/if}
       <section aria-labelledby="pg">
         <!-- Legenda delle pedine (RF-35). -->
         <h2 id="pg">Personaggi</h2>

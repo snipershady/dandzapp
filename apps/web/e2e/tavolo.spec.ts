@@ -111,3 +111,30 @@ test('la mappa dei giocatori arriva solo dal server, mai l’immagine intera', a
   expect(r.status()).toBe(200);
   expect(r.headers()['content-type']).toBe('image/png');
 });
+
+test('il Master scopre una zona e la giocatrice la vede entro 3 secondi (RF-22)', async ({
+  browser,
+  request,
+  page,
+}) => {
+  const { master, irene, scheda } = await preparaTavolo(browser, request, page);
+  await master.goto(scheda);
+  const href = (p: Page) =>
+    p.getByRole('group', { name: 'Mappa del dungeon' }).locator('image').getAttribute('href');
+  const prima = await href(irene);
+
+  // La giocatrice non ha il pannello, il Master vede in trasparenza le 10 zone coperte.
+  await expect(irene.getByRole('region', { name: 'Zone' })).toHaveCount(0);
+  const nebbia = master.locator('.nebbia-master path');
+  await expect(nebbia).toHaveCount(10);
+
+  const pannello = master.getByRole('region', { name: 'Zone' });
+  await pannello.getByRole('checkbox', { name: '3 · Sacrario del falco' }).check();
+  await expect(nebbia).toHaveCount(9, ENTRO_3_SECONDI);
+  await expect.poll(() => href(irene), ENTRO_3_SECONDI).not.toBe(prima);
+
+  // Togliendo la spunta la zona si ricopre.
+  await pannello.getByRole('checkbox', { name: '3 · Sacrario del falco' }).uncheck();
+  await expect(nebbia).toHaveCount(10, ENTRO_3_SECONDI);
+  await expect.poll(() => href(irene), ENTRO_3_SECONDI).toBe(prima);
+});

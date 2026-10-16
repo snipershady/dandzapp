@@ -10,6 +10,7 @@ import type {
   PresenteAlTavolo,
   RispostaComando,
   RispostaEntra,
+  RispostaIstantanea,
 } from '@dandzapp/shared';
 import { io as ioClient, type Socket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -400,5 +401,63 @@ describe('pedine dei PG (RF-31, RF-34)', () => {
     expect(await riporta(sm)).toEqual({ ok: true });
     expect((await evento)[0].tipo).toBe('modificata');
     expect(await posizioni()).toEqual(partenza);
+  });
+});
+
+describe('nebbia di guerra (RF-22)', () => {
+  const imposta = (s: Client, zonaId: string, scoperta: boolean) =>
+    new Promise<RispostaComando>((ok) => s.emit('zona:imposta', { zonaId, scoperta }, ok));
+  const scoperte = async () =>
+    (
+      await ctx.db
+        .selectFrom('zone_scoperte')
+        .select('zona_id')
+        .where('partita_id', '=', partitaId)
+        .orderBy('zona_id')
+        .execute()
+    ).map((r) => r.zona_id);
+
+  it('il Master scopre una zona e i giocatori ricevono una mappa nuova', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const [sm, si] = [collega(master), collega(irene.token)];
+    await entra(sm);
+    const ri = await entra(si);
+    if (!ri.ok) throw new Error('ingresso fallito');
+
+    const evento = prossimo(si, 'partita:evento');
+    expect(await imposta(sm, 'sala1', true)).toEqual({ ok: true });
+    expect((await evento)[0]).toEqual({
+      tipo: 'modificata',
+      versione: ri.istantanea.versione + 1,
+    });
+    expect(await scoperte()).toEqual(['ingresso', 'sala1']);
+    const dopo = await new Promise<RispostaIstantanea>((ok) => si.emit('partita:istantanea', ok));
+    if (!dopo.ok) throw new Error('istantanea fallita');
+    expect(dopo.istantanea.dettaglio.mappa.chiave).not.toBe(ri.istantanea.dettaglio.mappa.chiave);
+    expect(dopo.istantanea.dettaglio.zone).toBeUndefined();
+
+    // Ripetere il comando non è un errore; togliendo la spunta la zona si ricopre.
+    expect(await imposta(sm, 'sala1', true)).toEqual({ ok: true });
+    expect(await imposta(sm, 'ingresso', false)).toEqual({ ok: true });
+    expect(await scoperte()).toEqual(['sala1']);
+  });
+
+  it('giocatori e osservatori non toccano la nebbia; le zone devono esistere', async () => {
+    const irene = await giocatore('irene@esempio.it');
+    const luca = await giocatore('luca@esempio.it', 'osservatore');
+    const [sm, si, sl] = [collega(master), collega(irene.token), collega(luca.token)];
+    await entra(sm);
+    await entra(si);
+    await entra(sl);
+
+    const vietato = { ok: false, errore: 'Solo il Master della partita può farlo' };
+    expect(await imposta(si, 'sala3', true)).toEqual(vietato);
+    expect(await imposta(sl, 'sala3', true)).toEqual(vietato);
+    expect(await imposta(sm, 'stanza_inventata', true)).toEqual({
+      ok: false,
+      errore: 'Zona inesistente',
+    });
+    expect(await imposta(sm, '', true)).toEqual({ ok: false, errore: 'Comando non valido' });
+    expect(await scoperte()).toEqual(['ingresso']);
   });
 });

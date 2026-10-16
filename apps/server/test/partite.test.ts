@@ -483,6 +483,8 @@ describe('mappa del tavolo (RF-10, §15.3)', () => {
   // Punti interni alla Scala d'ingresso (zona iniziale) e al Sacrario del falco (coperto).
   const INGRESSO = [480, 900] as const;
   const SACRARIO = [380, 192] as const;
+  // Un punto della parete del passaggio segreto: bianco nella mappa, nero nel ritaglio.
+  const SEGRETO = [620, 188] as const;
 
   it('la partita nasce con le sole zone iniziali scoperte (RF-23)', async () => {
     const id = await nuovaPartita();
@@ -499,9 +501,14 @@ describe('mappa del tavolo (RF-10, §15.3)', () => {
       path.join(temporanea, 'avventure', 'sessione-0', 'mappa_giocatori.png'),
     );
 
+    // Il Master vede tutto, compresi i segreti già al loro posto.
     const delMaster = await mappa(master, id);
     expect(delMaster.statusCode).toBe(200);
-    expect(delMaster.rawPayload.equals(originale)).toBe(true);
+    expect(await pixel(delMaster.rawPayload, ...SACRARIO)).toEqual(
+      await pixel(originale, ...SACRARIO),
+    );
+    expect((await pixel(originale, ...SEGRETO))[0]).toBeGreaterThan(240);
+    expect((await pixel(delMaster.rawPayload, ...SEGRETO)).slice(0, 3)).toEqual([17, 17, 17]);
 
     const r = await mappa(token, id);
     expect(r.statusCode).toBe(200);
@@ -509,7 +516,7 @@ describe('mappa del tavolo (RF-10, §15.3)', () => {
     expect((await pixel(r.rawPayload, ...SACRARIO))[3]).toBe(0);
     expect(await pixel(r.rawPayload, ...INGRESSO)).toEqual(await pixel(originale, ...INGRESSO));
 
-    // Scoperta una zona, cambiano la chiave e l'immagine (il pannello arriva con lo step 7).
+    // Scoperta una zona, cambiano la chiave e l'immagine.
     const prima = (await dettaglio(token, id)).mappa.chiave;
     await ctx.db.insertInto('zone_scoperte').values({ partita_id: id, zona_id: 'sala3' }).execute();
     expect((await dettaglio(token, id)).mappa.chiave).not.toBe(prima);
@@ -580,5 +587,67 @@ describe('"Giochi come" (RF-03)', () => {
     expect(r.statusCode).toBe(400);
     expect(r.json().campi).toEqual({ personaggioId: 'Personaggio inesistente' });
     expect((await io(token, { personaggioId: 'Shania' })).statusCode).toBe(400);
+  });
+});
+
+describe('nebbia di guerra (RF-20…RF-24)', () => {
+  async function pixel(png: Buffer, x: number, y: number): Promise<number[]> {
+    const { data, info } = await sharp(png)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const i = (y * info.width + x) * 4;
+    return [...data.subarray(i, i + 4)];
+  }
+  const SEGRETO = [620, 188] as const;
+  // Un punto del Sacrario che il ritaglio del segreto ridisegna: il ritaglio sconfina lì.
+  const NEL_SACRARIO = [568, 188] as const;
+  const scopri = (id: number, zonaId: string, scoperta = true) =>
+    ctx.db
+      .transaction()
+      .execute(async (trx) =>
+        scoperta
+          ? trx.insertInto('zone_scoperte').values({ partita_id: id, zona_id: zonaId }).execute()
+          : trx
+              .deleteFrom('zone_scoperte')
+              .where('partita_id', '=', id)
+              .where('zona_id', '=', zonaId)
+              .execute(),
+      );
+
+  it('le zone e i loro poligoni arrivano solo al Master', async () => {
+    const id = await nuovaPartita();
+    const { token } = await unisci(id, 'irene@esempio.it');
+    const delMaster = await dettaglio(master, id);
+    expect(delMaster.zone).toHaveLength(11);
+    expect(delMaster.zone?.filter((z) => z.scoperta).map((z) => z.id)).toEqual(['ingresso']);
+    const risposta = await chiama(token, 'GET', `/api/partite/${id}`);
+    expect(risposta.json().zone).toBeUndefined();
+    // Nessun poligono né nome di zona nei dati del giocatore.
+    expect(risposta.body).not.toContain('Sacrario');
+    expect(risposta.body).not.toContain('M572.0');
+  });
+
+  it('il passaggio segreto compare ai giocatori solo a zona scoperta', async () => {
+    const id = await nuovaPartita();
+    const { token } = await unisci(id, 'irene@esempio.it');
+    const immagine = async () =>
+      (await chiama(token, 'GET', `/api/partite/${id}/mappa`)).rawPayload;
+
+    expect((await pixel(await immagine(), ...SEGRETO))[3]).toBe(0);
+    // Il Sacrario confina con il passaggio: scoprirlo non deve rivelare il segreto.
+    await scopri(id, 'sala3');
+    const soloSacrario = await immagine();
+    expect((await pixel(soloSacrario, ...NEL_SACRARIO))[0]).toBeGreaterThan(240);
+    expect((await pixel(soloSacrario, ...SEGRETO))[3]).toBe(0);
+
+    await scopri(id, 'passaggio');
+    const conPassaggio = await immagine();
+    expect((await pixel(conPassaggio, ...SEGRETO)).slice(0, 3)).toEqual([17, 17, 17]);
+    expect((await pixel(conPassaggio, ...NEL_SACRARIO)).slice(0, 3)).toEqual([17, 17, 17]);
+
+    // Ricoperta la zona, il segreto sparisce di nuovo.
+    await scopri(id, 'passaggio', false);
+    expect((await pixel(await immagine(), ...SEGRETO))[3]).toBe(0);
   });
 });

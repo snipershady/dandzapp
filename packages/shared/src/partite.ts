@@ -188,6 +188,16 @@ export const MappaPartita = z.object({
 });
 export type MappaPartita = z.infer<typeof MappaPartita>;
 
+/** Zona della nebbia vista dal Master (RF-22): ai giocatori non arriva nessuna zona. */
+export const ZonaPartita = z.object({
+  id: z.string(),
+  nome: z.string(),
+  /** Poligono in coordinate mappa (solo comandi M, L, Z). */
+  percorso: z.string(),
+  scoperta: z.boolean(),
+});
+export type ZonaPartita = z.infer<typeof ZonaPartita>;
+
 export const DettaglioPartita = z.object({
   partita: RiepilogoPartita,
   /** Versione dello stato di gioco: cresce a ogni modifica (§15.3). */
@@ -197,5 +207,7 @@ export const DettaglioPartita = z.object({
   partecipanti: z.array(Partecipante),
   /** Solo per il Master della partita. */
   inviti: z.array(Invito).optional(),
+  /** Solo per il Master: tutte le zone, scoperte e no (RF-21, RF-22). */
+  zone: z.array(ZonaPartita).optional(),
 });
 export type DettaglioPartita = z.infer<typeof DettaglioPartita>;

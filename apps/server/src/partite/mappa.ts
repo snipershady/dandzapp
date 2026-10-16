@@ -9,7 +9,8 @@ import type { Db } from '../db/database.ts';
 /**
  * Mappa del tavolo (RF-10, §15.3). Ai giocatori e agli osservatori non arriva mai
  * l'immagine intera: il server compone un PNG con le sole zone scoperte, trasparente
- * altrove (la nebbia la disegna il browser). Il Master riceve l'immagine intera.
+ * altrove (la nebbia la disegna il browser), con i segreti delle zone scoperte (RF-24).
+ * Il Master riceve l'immagine intera, con tutti i segreti.
  *
  * Le immagini composte stanno in `DATA_DIR/cache/mappe/<avventura>/` con un nome che
  * dipende dalle zone scoperte e dalla data d'importazione dell'avventura: partite con
@@ -79,13 +80,7 @@ export async function fileMappa(
   ruolo: RuoloInPartita,
 ): Promise<{ file: string; chiave: string }> {
   const dati = await datiMappa(db, partitaId);
-  const originale = path.join(
-    cartellaAvventura(cartellaDati, dati.slug),
-    dati.definizione.mappa.immagine,
-  );
   const nome = chiave(dati, ruolo);
-  if (ruolo === 'master') return { file: originale, chiave: nome };
-
   const cartella = path.join(cartellaDati, 'cache', 'mappe', dati.slug);
   const file = path.join(cartella, `${nome}.png`);
   if (await esiste(file)) return { file, chiave: nome };
@@ -94,13 +89,37 @@ export async function fileMappa(
   // Si scrive su un file temporaneo e poi lo si rinomina: due richieste contemporanee
   // non lasciano mai un'immagine a metà.
   const temporaneo = `${file}.${randomBytes(6).toString('hex')}.tmp`;
-  await componi(originale, dati).toFile(temporaneo);
+  const sorgenti = cartellaAvventura(cartellaDati, dati.slug);
+  await (ruolo === 'master' ? componiIntera(sorgenti, dati) : componiScoperta(sorgenti, dati))
+    .png()
+    .toFile(temporaneo);
   await rename(temporaneo, file);
   return { file, chiave: nome };
 }
 
-/** L'immagine con le sole zone scoperte: la maschera è fatta dai loro poligoni. */
-function componi(originale: string, { definizione, zone }: DatiMappa): Sharp {
+/** Ritagli dei segreti (RF-24) da incollare sulla mappa, nella loro posizione. */
+function ritagli(sorgenti: string, segreti: DefinizioneAvventura['segreti']) {
+  return segreti.map((s) => ({
+    input: path.join(sorgenti, s.immagine),
+    left: s.x,
+    top: s.y,
+  }));
+}
+
+/** Per il Master: la mappa intera, con tutti i segreti già al loro posto. */
+function componiIntera(sorgenti: string, { definizione }: DatiMappa): Sharp {
+  const immagine = sharp(path.join(sorgenti, definizione.mappa.immagine));
+  return definizione.segreti.length > 0
+    ? immagine.composite(ritagli(sorgenti, definizione.segreti))
+    : immagine;
+}
+
+/**
+ * Per giocatori e osservatori: solo le zone scoperte, trasparente altrove. Un segreto
+ * compare solo se la sua zona è scoperta: il ritaglio può sconfinare in zone vicine (es. la
+ * parete del Sacrario del falco), quindi non basta la maschera.
+ */
+function componiScoperta(sorgenti: string, { definizione, zone }: DatiMappa): Sharp {
   const { larghezza, altezza } = definizione.mappa;
   const scoperte = definizione.zone.filter((z) => zone.includes(z.id));
   if (scoperte.length === 0) {
@@ -111,17 +130,17 @@ function componi(originale: string, { definizione, zone }: DatiMappa): Sharp {
         channels: 4,
         background: { r: 0, g: 0, b: 0, alpha: 0 },
       },
-    }).png();
+    });
   }
+  const segreti = definizione.segreti.filter((s) => zone.includes(s.zona));
   // I percorsi sono validati all'importazione: solo comandi M, L, Z e numeri.
   const maschera =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${larghezza}" height="${altezza}">` +
     scoperte.map((z) => `<path fill="#fff" d="${z.percorso}"/>`).join('') +
     '</svg>';
-  return sharp(originale)
+  return sharp(path.join(sorgenti, definizione.mappa.immagine))
     .ensureAlpha()
-    .composite([{ input: Buffer.from(maschera), blend: 'dest-in' }])
-    .png();
+    .composite([...ritagli(sorgenti, segreti), { input: Buffer.from(maschera), blend: 'dest-in' }]);
 }
 
 async function esiste(file: string): Promise<boolean> {

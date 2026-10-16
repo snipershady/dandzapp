@@ -4,7 +4,9 @@
     MappaPartita,
     Personaggio,
     RispostaComando,
+    ZonaPartita,
   } from '@dandzapp/shared';
+  import { untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
 
   /**
@@ -16,6 +18,7 @@
     partitaId,
     mappa,
     personaggi,
+    zone,
     mioPersonaggioId,
     puoMuovere,
     sposta,
@@ -24,6 +27,8 @@
     partitaId: number;
     mappa: MappaPartita;
     personaggi: Personaggio[];
+    /** Solo per il Master: le zone, per la nebbia in trasparenza (RF-21). */
+    zone?: ZonaPartita[] | undefined;
     /** PG scelto con "Giochi come": la sua pedina ha il bordo dorato (RF-32). */
     mioPersonaggioId: number | null;
     puoMuovere: boolean;
@@ -36,6 +41,23 @@
   const Q = $derived(mappa.quadretto.px);
 
   let svg = $state<SVGSVGElement>();
+
+  /**
+   * Quando cambia la mappa (una zona scoperta) la nuova immagine si scarica prima di
+   * mostrarla: niente lampo di nebbia mentre arriva.
+   */
+  const urlMappa = $derived(`/api/partite/${partitaId}/mappa?k=${mappa.chiave}`);
+  let urlMostrato = $state(untrack(() => urlMappa));
+  $effect(() => {
+    const url = urlMappa;
+    if (url === untrack(() => urlMostrato)) return;
+    const immagine = new Image();
+    immagine.onload = immagine.onerror = () => {
+      if (urlMappa === url) urlMostrato = url;
+    };
+    immagine.src = url;
+  });
+  const coperte = $derived((zone ?? []).filter((z) => !z.scoperta));
   /** Larghezza a schermo della mappa, per tenere le pedine leggibili anche sul telefono. */
   let larghezzaSchermo = $state(0);
   const scala = $derived(larghezzaSchermo > 0 ? larghezzaSchermo / W : 1);
@@ -174,7 +196,14 @@
   <!-- Fuori dalle zone scoperte l'immagine è trasparente: sotto c'è la nebbia. -->
   <rect class="nebbia" width={W} height={H} />
   <rect width={W} height={H} fill="url(#griglia)" />
-  <image href="/api/partite/{partitaId}/mappa?k={mappa.chiave}" width={W} height={H} />
+  <image href={urlMostrato} width={W} height={H} />
+  <!-- Il Master vede le zone coperte in trasparenza; la nebbia non intercetta i clic (RF-25). -->
+  <!-- L'opacità è del gruppo: dove due zone si sovrappongono la nebbia non si scurisce. -->
+  <g class="nebbia-master">
+    {#each coperte as z (z.id)}
+      <path d={z.percorso} data-zona={z.id} />
+    {/each}
+  </g>
 
   {#each ordinate as pg (pg.id)}
     {@const p = posizione(pg)}
@@ -250,6 +279,11 @@
     height: 0.4rem;
     border: 1px solid var(--testo);
     background: linear-gradient(to right, var(--testo) 50%, transparent 50%);
+  }
+  .nebbia-master {
+    fill: var(--nebbia);
+    opacity: 0.55;
+    pointer-events: none;
   }
   .linea-griglia {
     fill: none;

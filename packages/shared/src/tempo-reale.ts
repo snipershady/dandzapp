@@ -52,6 +52,12 @@ export const ComandoSpostaPedina = z
   .strict();
 export type ComandoSpostaPedina = z.infer<typeof ComandoSpostaPedina>;
 
+/** Comando del Master: scopre o ricopre una zona della nebbia (RF-22). */
+export const ComandoZona = z
+  .object({ zonaId: z.string().min(1).max(64), scoperta: z.boolean() })
+  .strict();
+export type ComandoZona = z.infer<typeof ComandoZona>;
+
 /** Esito di un comando inviato al server. */
 export type RispostaComando = { ok: true } | { ok: false; errore: string };
 
@@ -71,4 +77,6 @@ export interface EventiDalClient {
   'pedina:sposta': (comando: ComandoSpostaPedina, risposta: (r: RispostaComando) => void) => void;
   /** Solo Master: riporta tutte le pedine dei PG ai posti di partenza (RF-34). */
   'pedine:riporta': (risposta: (r: RispostaComando) => void) => void;
+  /** Solo Master: scopre o ricopre una zona (RF-22). */
+  'zona:imposta': (comando: ComandoZona, risposta: (r: RispostaComando) => void) => void;
 }
