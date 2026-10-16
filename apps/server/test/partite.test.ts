@@ -651,3 +651,61 @@ describe('nebbia di guerra (RF-20…RF-24)', () => {
     expect((await pixel(await immagine(), ...SEGRETO))[3]).toBe(0);
   });
 });
+
+describe('esportazione JSON (RF-95)', () => {
+  it('solo il Master scarica il backup, con lo stato completo e senza dati di accesso', async () => {
+    const id = await nuovaPartita();
+    const { token } = await unisci(id, 'irene@esempio.it');
+    const estraneo = await registra(ctx.app, { email: 'estraneo@esempio.it' });
+    await chiama(master, 'POST', `/api/partite/${id}/personaggi`, { nome: 'Shania', sigla: 'Sh' });
+    await chiama(master, 'POST', `/api/partite/${id}/inviti`, { email: 'fabio@esempio.it' });
+    // Un tiro nascosto del Master e un mostro, scritti direttamente.
+    const { id: masterId } = await ctx.db
+      .selectFrom('utenti')
+      .select('id')
+      .where('email', '=', 'marco@esempio.it')
+      .executeTakeFirstOrThrow();
+    await ctx.db
+      .insertInto('tiri')
+      .values({
+        partita_id: id,
+        utente_id: masterId,
+        personaggio_nome: 'Master',
+        n_dadi: 1,
+        facce: 20,
+        modificatore: 0,
+        risultati: '[7]',
+        totale: 7,
+        nascosto: true,
+      })
+      .execute();
+    await ctx.db
+      .insertInto('mostri')
+      .values({ partita_id: id, nome: 'Stirge', sigla: 'St1', x: 1, y: 2 })
+      .execute();
+
+    const url = `/api/partite/${id}/backup`;
+    expect((await chiama(token, 'GET', url)).statusCode).toBe(403);
+    expect((await chiama(estraneo, 'GET', url)).statusCode).toBe(404);
+    expect((await chiama(null, 'GET', url)).statusCode).toBe(401);
+
+    const r = await chiama(master, 'GET', url);
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-disposition']).toMatch(
+      new RegExp(`^attachment; filename="partita-${id}-\\d{4}-\\d{2}-\\d{2}\\.json"$`),
+    );
+    const b = r.json();
+    expect(b).toMatchObject({
+      formato: 1,
+      partita: { id, master: { email: 'marco@esempio.it' }, avventura: { id: 'sessione-0' } },
+      zoneScoperte: ['ingresso'],
+      mostri: [{ sigla: 'St1' }],
+      tiri: [{ nascosto: true, totale: 7, risultati: [7] }],
+      invitiInSospeso: [{ email: 'fabio@esempio.it' }],
+    });
+    expect(b.partecipanti).toEqual([expect.objectContaining({ email: 'irene@esempio.it' })]);
+    expect(b.personaggi[0]).toMatchObject({ nome: 'Shania', x: expect.any(Number) });
+    // Nessun dato di accesso.
+    expect(r.body).not.toMatch(/password|hash|token/i);
+  });
+});

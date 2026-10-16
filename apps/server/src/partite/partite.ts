@@ -10,6 +10,7 @@ import { ErroreHttp } from '../http/errori.ts';
 import { elencaInviti } from './inviti.ts';
 import { infoMappa } from './mappa.ts';
 import { elencaMostri, tipiMostro } from './mostri.ts';
+import { narrazioneCorrente, storicoNarrazioni } from './narrazione.ts';
 import { zoneDelMaster } from './nebbia.ts';
 import { elencaTiri } from './tiri.ts';
 import { elencaPartecipanti } from './partecipanti.ts';
@@ -107,7 +108,18 @@ export async function dettaglioPartita(
     .where('partite.id', '=', partitaId)
     .executeTakeFirstOrThrow();
   const master = ruolo === 'master';
-  const [mappa, personaggi, partecipanti, inviti, zone, mostri, tiri, tipi] = await Promise.all([
+  const [
+    mappa,
+    personaggi,
+    partecipanti,
+    inviti,
+    zone,
+    mostri,
+    tiri,
+    tipi,
+    narrazione,
+    narrazioni,
+  ] = await Promise.all([
     infoMappa(db, partitaId, ruolo),
     elencaPersonaggi(db, partitaId),
     elencaPartecipanti(db, partitaId),
@@ -119,6 +131,8 @@ export async function dettaglioPartita(
     // I tiri nascosti solo al Master (RF-61).
     elencaTiri(db, partitaId, ruolo),
     master ? tipiMostro(db, partitaId) : undefined,
+    narrazioneCorrente(db, partitaId),
+    master ? storicoNarrazioni(db, partitaId) : undefined,
   ]);
   return {
     partita: aRiepilogo(riepilogo, ruolo),
@@ -131,6 +145,8 @@ export async function dettaglioPartita(
     mostri,
     tiri,
     ...(tipi ? { tipiMostro: tipi } : {}),
+    narrazione,
+    ...(narrazioni ? { narrazioni } : {}),
   };
 }
 

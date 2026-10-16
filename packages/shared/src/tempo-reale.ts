@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { DettaglioPartita, RuoloInPartita, type Tiro } from './partite.ts';
+import {
+  DettaglioPartita,
+  MAX_NARRAZIONE,
+  RuoloInPartita,
+  type Narrazione,
+  type Tiro,
+} from './partite.ts';
 
 /**
  * Protocollo Socket.IO del tavolo (§15.3). Il server è l'unica autorità: il client
@@ -44,7 +50,9 @@ export type EventoPartita =
   /** Solo al Master: la posizione salvata di un mostro (RF-43). */
   | { versione: number; tipo: 'mostro:spostato'; mostroId: number; x: number; y: number }
   /** Un tiro nuovo; quelli nascosti arrivano solo al Master (RF-54). */
-  | { versione: number; tipo: 'dado:tirato'; tiro: Tiro };
+  | { versione: number; tipo: 'dado:tirato'; tiro: Tiro }
+  /** Il testo "Il Master legge" mostrato ora, o `null` se nascosto (RF-70). */
+  | { versione: number; tipo: 'narrazione:cambiata'; narrazione: Narrazione | null };
 
 /** Comando "sposta una pedina PG" (RF-31): coordinate della mappa, controllate dal server. */
 export const ComandoSpostaPedina = z
@@ -119,6 +127,22 @@ export type ComandoTira = z.input<typeof ComandoTira>;
 
 export type RispostaTiro = { ok: true; tiro: Tiro } | { ok: false; errore: string };
 
+/** Comando del Master: pubblica un nuovo testo per tutti (RF-70). */
+export const ComandoPubblicaNarrazione = z
+  .object({
+    testo: z
+      .string()
+      .trim()
+      .min(1, 'Scrivi il testo da leggere')
+      .max(MAX_NARRAZIONE, `Il testo può avere al massimo ${MAX_NARRAZIONE} caratteri`),
+  })
+  .strict();
+export type ComandoPubblicaNarrazione = z.input<typeof ComandoPubblicaNarrazione>;
+
+/** Comando del Master su un testo già pubblicato: ripubblicarlo o toglierlo dallo storico. */
+export const ComandoNarrazione = z.object({ narrazioneId: z.number().int().positive() }).strict();
+export type ComandoNarrazione = z.infer<typeof ComandoNarrazione>;
+
 /** Esito di un comando inviato al server. */
 export type RispostaComando = { ok: true } | { ok: false; errore: string };
 
@@ -152,4 +176,18 @@ export interface EventiDalClient {
   'dadi:tira': (comando: ComandoTira, risposta: (r: RispostaTiro) => void) => void;
   /** Solo Master: svuota lo storico dei tiri (RF-62). */
   'tiri:svuota': (risposta: (r: RispostaComando) => void) => void;
+  /** Solo Master: narrazione "Il Master legge" (RF-70). */
+  'narrazione:pubblica': (
+    comando: ComandoPubblicaNarrazione,
+    risposta: (r: RispostaComando) => void,
+  ) => void;
+  'narrazione:ripubblica': (
+    comando: ComandoNarrazione,
+    risposta: (r: RispostaComando) => void,
+  ) => void;
+  'narrazione:elimina': (
+    comando: ComandoNarrazione,
+    risposta: (r: RispostaComando) => void,
+  ) => void;
+  'narrazione:nascondi': (risposta: (r: RispostaComando) => void) => void;
 }

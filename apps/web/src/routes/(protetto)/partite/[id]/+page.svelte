@@ -10,6 +10,8 @@
   import AlTavolo from '#lib/tavolo/AlTavolo.svelte';
   import { Collegamento } from '#lib/tavolo/collegamento.svelte.ts';
   import Mappa from '#lib/tavolo/Mappa.svelte';
+  import MasterLegge from '#lib/tavolo/MasterLegge.svelte';
+  import PannelloNarrazione from '#lib/tavolo/PannelloNarrazione.svelte';
   import Dadi from '#lib/tavolo/Dadi.svelte';
   import PannelloMostri from '#lib/tavolo/PannelloMostri.svelte';
   import PannelloZone from '#lib/tavolo/PannelloZone.svelte';
@@ -27,9 +29,18 @@
     return () => collegamento.ferma();
   });
 
-  const { partita, mappa, personaggi, partecipanti, zone, mostri, tiri, tipiMostro } = $derived(
-    collegamento.dettaglio,
-  );
+  const {
+    partita,
+    mappa,
+    personaggi,
+    partecipanti,
+    zone,
+    mostri,
+    tiri,
+    tipiMostro,
+    narrazione,
+    narrazioni,
+  } = $derived(collegamento.dettaglio);
   const nomeDi = (id: number | null) => partecipanti.find((p) => p.utenteId === id)?.nome;
   let errore = $state<string | null>(null);
 
@@ -112,6 +123,8 @@
     {/if}
     {#if errore}<Avviso>{errore}</Avviso>{/if}
 
+    <MasterLegge {narrazione} />
+
     <section class="tavolo" aria-label="Tavolo">
       <div class="comandi">
         {#if partita.mioRuolo === 'master'}
@@ -166,6 +179,18 @@
     </div>
 
     <div class="colonne">
+      {#if narrazioni}
+        <PannelloNarrazione
+          corrente={narrazione}
+          storico={narrazioni}
+          disabilitato={partita.stato !== 'attiva'}
+          pubblica={(t) => collegamento.pubblicaNarrazione(t)}
+          ripubblica={(id) => collegamento.ripubblicaNarrazione(id)}
+          elimina={(id) => collegamento.eliminaNarrazione(id)}
+          nascondi={() => collegamento.nascondiNarrazione()}
+          onerrore={(m) => (errore = m)}
+        />
+      {/if}
       {#if zone}
         <PannelloZone
           {zone}

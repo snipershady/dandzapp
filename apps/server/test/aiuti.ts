@@ -22,6 +22,7 @@ export type Contesto = {
 };
 
 const TABELLE = [
+  'narrazioni',
   'tiri',
   'mostri_sigle',
   'mostri',

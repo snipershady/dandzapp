@@ -23,6 +23,7 @@ export type Database = {
   mostri: TabellaMostri;
   mostri_sigle: TabellaMostriSigle;
   tiri: TabellaTiri;
+  narrazioni: TabellaNarrazioni;
 };
 
 /** Colonna con valore predefinito: facoltativa in inserimento. */
@@ -79,6 +80,8 @@ export type TabellaPartite = {
   stato: ConDefault<StatoPartita>;
   /** BIGINT: mysql2 lo restituisce come stringa oltre 2^53, qui resta sempre piccolo. */
   versione: ConDefault<number>;
+  /** Narrazione mostrata ora al tavolo (RF-70); `null` = nascosta. */
+  narrazione_id: ConDefault<number | null>;
   creata_il: ConDefault<Date>;
   aggiornata_il: ConDefault<Date>;
 };
@@ -161,4 +164,13 @@ export type TabellaTiri = {
   /** MySQL restituisce i boolean come 0/1. */
   nascosto: ColumnType<number, boolean | undefined, boolean>;
   creato_il: ConDefault<Date>;
+};
+
+/** Testi "Il Master legge" pubblicati in una partita (RF-70). */
+export type TabellaNarrazioni = {
+  id: Generated<number>;
+  partita_id: number;
+  testo: string;
+  creata_il: ConDefault<Date>;
+  pubblicata_il: ConDefault<Date>;
 };

@@ -228,6 +228,17 @@ export const Tiro = z.object({
 });
 export type Tiro = z.infer<typeof Tiro>;
 
+/** Testo "Il Master legge" (RF-70). */
+export const Narrazione = z.object({
+  id,
+  testo: z.string(),
+  pubblicataIl: z.string(),
+});
+export type Narrazione = z.infer<typeof Narrazione>;
+
+/** Lunghezza massima di un testo della narrazione. */
+export const MAX_NARRAZIONE = 2000;
+
 /** Quanti tiri mostra lo storico del tavolo (RF-60). */
 export const TIRI_NELLO_STORICO = 40;
 
@@ -247,6 +258,10 @@ export const DettaglioPartita = z.object({
    * (RF-42, RF-44).
    */
   mostri: z.array(Mostro),
+  /** Testo mostrato ora a tutti nel riquadro "Il Master legge", o `null` se nascosto. */
+  narrazione: Narrazione.nullable(),
+  /** Solo per il Master: i testi già pubblicati, dal più recente, da ripubblicare. */
+  narrazioni: z.array(Narrazione).optional(),
   /** Ultimi tiri, dal più recente; i nascosti solo per il Master (RF-60, RF-61). */
   tiri: z.array(Tiro),
   /** Solo per il Master: i tipi di mostro previsti dall'avventura (RF-40). */

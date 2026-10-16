@@ -77,6 +77,16 @@
     />
   </div>
 
+  <div class="riga">
+    <span>
+      Esporta lo stato della partita (nebbia, pedine, mostri, narrazione, tiri) in un file JSON
+      (RF-95). Il file contiene le email dei partecipanti: conservalo con cura.
+    </span>
+    <!-- Download dall'API, non una pagina della SPA: resolve() non c'entra. -->
+    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+    <a class="pulsante" href="/api/partite/{partita.id}/backup" download>Esporta (JSON)</a>
+  </div>
+
   <div class="riga pericolo">
     <span>Elimina la partita con personaggi, partecipanti e inviti. Non si può annullare.</span>
     <PulsanteConferma
@@ -101,6 +111,14 @@
   }
   .rinomina button {
     margin-bottom: 1rem;
+  }
+  .pulsante {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--bordo);
+    border-radius: 0.5rem;
+    color: var(--testo);
+    text-decoration: none;
+    background: var(--superficie);
   }
   .riga {
     display: flex;

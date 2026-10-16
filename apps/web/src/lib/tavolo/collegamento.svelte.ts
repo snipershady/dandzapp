@@ -150,6 +150,23 @@ export class Collegamento {
     return this.#comando((s, r) => s.emit('dadi:tira', comando, r));
   }
 
+  /** Solo Master: narrazione "Il Master legge" (RF-70). */
+  pubblicaNarrazione(testo: string): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('narrazione:pubblica', { testo }, r));
+  }
+
+  ripubblicaNarrazione(narrazioneId: number): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('narrazione:ripubblica', { narrazioneId }, r));
+  }
+
+  eliminaNarrazione(narrazioneId: number): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('narrazione:elimina', { narrazioneId }, r));
+  }
+
+  nascondiNarrazione(): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('narrazione:nascondi', r));
+  }
+
   /** Solo Master: svuota lo storico dei tiri (RF-62). */
   svuotaTiri(): Promise<RispostaComando> {
     return this.#comando((s, r) => s.emit('tiri:svuota', r));
@@ -188,7 +205,9 @@ export class Collegamento {
       void this.#riallinea();
       return;
     }
-    if (evento.tipo === 'dado:tirato') {
+    if (evento.tipo === 'narrazione:cambiata') {
+      this.dettaglio.narrazione = evento.narrazione;
+    } else if (evento.tipo === 'dado:tirato') {
       const tiri = this.dettaglio.tiri.filter((t) => t.id !== evento.tiro.id);
       this.dettaglio.tiri = [evento.tiro, ...tiri].slice(0, TIRI_NELLO_STORICO);
     } else {

@@ -22,6 +22,7 @@ import { emailInvito } from '../email/modelli.ts';
 import { ErroreHttp, valida } from '../http/errori.ts';
 import { accessoPartita, richiediMasterPartita } from '../partite/accesso.ts';
 import { accettaInvito, creaInvito, infoInvito, revocaInvito } from '../partite/inviti.ts';
+import { backupPartita } from '../partite/backup.ts';
 import { fileMappa } from '../partite/mappa.ts';
 import {
   cambiaRuoloPartecipante,
@@ -106,6 +107,23 @@ export function rottePartite(
     risposta.header('Cache-Control', 'private, no-cache').header('ETag', etag);
     if (richiesta.headers['if-none-match'] === etag) return risposta.code(304).send();
     return risposta.type('image/png').send(createReadStream(file));
+  });
+
+  /**
+   * Esportazione JSON dello stato della partita (RF-95), solo per il suo Master. Contiene
+   * le email dei partecipanti: il file va trattato come dato personale.
+   */
+  app.get('/api/partite/:id/backup', async (richiesta, risposta) => {
+    const { id } = valida(ParamPartita, richiesta.params);
+    await masterDi(richiesta, id);
+    const adesso = ora();
+    const corpo = await backupPartita(db, id, adesso);
+    const data = adesso.toISOString().slice(0, 10);
+    return risposta
+      .header('Cache-Control', 'private, no-store')
+      .header('Content-Disposition', `attachment; filename="partita-${id}-${data}.json"`)
+      .type('application/json; charset=utf-8')
+      .send(JSON.stringify(corpo, null, 2));
   });
 
   // ---------------------------------------------------------------- personaggi

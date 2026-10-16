@@ -184,7 +184,7 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 
 ### 5.8 Narrazione
 
-- **RF-70** Il Master scrive un testo e lo pubblica: appare a tutti in un riquadro "Il Master legge" sopra la mappa, in corsivo. Può nasconderlo.
+- **RF-70** Il Master scrive un testo e lo pubblica: appare a tutti in un riquadro "Il Master legge" sopra la mappa, in corsivo. Può nasconderlo. I testi pubblicati restano in uno storico visibile solo al Master, da cui può ripubblicarli o eliminarli (decisione del 16/10/2026).
 
 ### 5.9 Presenza
 
@@ -198,7 +198,7 @@ Ogni requisito ha un codice (RF-xx) per riferimento in issue e commit.
 - **RF-92 Stato del collegamento.** Riga sotto la mappa: collegato / non collegato al server, permessi (può giocare / sola lettura), ora dell'ultimo aggiornamento, eventuali errori. Pulsante "Aggiorna ora".
 - **RF-93 Persistenza.** Lo stato di ogni partita è salvato in MySQL e sopravvive alla chiusura delle pagine e tra una sessione e l'altra.
 - **RF-94 Trascinamenti concorrenti.** Mentre un utente trascina una pedina, gli aggiornamenti in arrivo non devono farla "saltare"; dopo il rilascio vince la posizione salvata.
-- **RF-95 Backup.** Il Master può esportare lo stato di una propria partita (nebbia, pedine, mostri, testo, tiri) in un file JSON. Il backup completo è quello del database MySQL.
+- **RF-95 Backup.** Il Master può esportare lo stato di una propria partita (nebbia, pedine, mostri, testo, tiri) in un file JSON. Il backup completo è quello del database MySQL. Il file contiene anche le email dei partecipanti e degli inviti in sospeso, ma nessun dato di accesso (decisione del 16/10/2026).
 
 ### 5.11 Chiedi a Claude — fuori dall'MVP
 
@@ -433,7 +433,7 @@ Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il
     - usa le stanze `utente:{id}` e `sessione:{hash}` per chiudere i collegamenti all'uscita o alla disattivazione dell'account.
   - **Rotte:** dopo ogni modifica chiamano `tempoReale.notifica(partitaId)`, che incrementa `versione` in una transazione e avvisa la stanza. Con `{ soloMaster: true }` avvisa solo il Master (es. gli inviti).
   - **Eventi:** `modificata` dice solo "riallineati" e il client chiede l'istantanea. Gli eventi con i dati (dallo step 6: `pedina:spostata`) il client li applica solo se la versione è la successiva attesa; con un salto chiede l'istantanea.
-  - **Comandi di gioco** (`pedina:sposta`, `pedine:riporta`, `zona:imposta`, `mostri:aggiungi`, `mostro:sposta`, `mostro:togli`, `mostri:togli-tutti`, `dadi:tira`, `tiri:svuota`) arrivano via Socket.IO e passano da `comando()` in `tempo-reale.ts`, che a ogni comando ricontrolla partecipazione, ruolo (gli osservatori sono in sola lettura) e partita non archiviata. Rispondono con un *ack* `{ ok } | { ok: false, errore }`; `dadi:tira` aggiunge il tiro alla risposta (`{ ok: true, tiro }`). Un tiro pubblico arriva a tutti con l'evento `dado:tirato`, uno nascosto solo al Master.
+  - **Comandi di gioco** (`pedina:sposta`, `pedine:riporta`, `zona:imposta`, `mostri:aggiungi`, `mostro:sposta`, `mostro:togli`, `mostri:togli-tutti`, `dadi:tira`, `tiri:svuota`, `narrazione:pubblica`, `narrazione:ripubblica`, `narrazione:elimina`, `narrazione:nascondi`) arrivano via Socket.IO e passano da `comando()` in `tempo-reale.ts`, che a ogni comando ricontrolla partecipazione, ruolo (gli osservatori sono in sola lettura) e partita non archiviata. Rispondono con un *ack* `{ ok } | { ok: false, errore }`; `dadi:tira` aggiunge il tiro alla risposta (`{ ok: true, tiro }`). Un tiro pubblico arriva a tutti con l'evento `dado:tirato`, uno nascosto solo al Master.
   - **Eventi riservati (step 8):** `modifica()` accetta `perGiocatori`. In quel caso `evento` va solo alla stanza del Master, e gli altri ricevono quello che restituisce `perGiocatori`, oppure niente con `null` (`io.to(stanza).except(stanzaMaster)`). Per i mostri: il Master riceve `mostro:spostato` con i dati, i giocatori ricevono `modificata` solo se il mostro era visibile prima o lo è dopo. Le modifiche ai mostri nascosti non lasciano traccia nemmeno nei tempi degli eventi; i giocatori vedranno solo un salto di versione alla modifica successiva.
   - **Visibilità dei mostri (RF-44):** un giocatore vede un mostro solo se il suo centro sta in una zona scoperta (`zonaDi` in `packages/shared/src/geometria.ts`, punto nel poligono); fuori da ogni zona resta nascosto (decisione del 16/10/2026).
   - **Atomicità:** un comando con dati usa `modifica()`. La scrittura e l'incremento di `versione` avvengono nella stessa transazione, con la riga della partita bloccata (`FOR UPDATE`), così i dati di un evento sono esattamente quelli della sua versione. `notifica()` delle rotte REST resta separata dalla scrittura: va bene perché emette solo `modificata`.
@@ -453,7 +453,8 @@ Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di 
 | `sessioni` | `token_hash` (PK, SHA-256 del token del cookie), `utente_id`, `scade_il` (30 giorni), `creato_il` |
 | `recuperi_password` | `token_hash` (PK), `utente_id`, `scade_il`, `usato_il` (uso singolo), `creato_il` |
 | `avventure` | `id`, `slug` (unico, = `id` di `avventura.json`), `titolo`, `sottotitolo`, `definizione` JSON (il file `avventura.json` validato), `importata_il`, `aggiornata_il`. Immagini in `DATA_DIR/avventure/<slug>/` |
-| `partite` | `id`, `titolo`, `master_id` → utenti, `avventura_id` → avventure (fissa), `stato` ENUM(`attiva`,`archiviata`), `versione`, `creata_il`, `aggiornata_il`. Da aggiungere allo step 10: `narrazione_testo`, `narrazione_pubblicata_il` |
+| `partite` | `id`, `titolo`, `master_id` → utenti, `avventura_id` → avventure (fissa), `stato` ENUM(`attiva`,`archiviata`), `versione`, `narrazione_id` → narrazioni (testo mostrato ora, `NULL` = nascosto), `creata_il`, `aggiornata_il` |
+| `narrazioni` | `id`, `partita_id`, `testo` (≤ 2000 caratteri), `creata_il`, `pubblicata_il`. Storico dei testi pubblicati: il Master li ripubblica o li elimina (decisione del 16/10/2026) |
 | `partecipazioni` | PK(`partita_id`, `utente_id`), `ruolo` ENUM(`giocatore`,`osservatore`), `personaggio_id` ("Giochi come", RF-03: preselezionato quando il Master assegna un PG), `creata_il` |
 | `inviti` | `id`, `partita_id`, `email`, `ruolo`, `personaggio_id`, `token_hash` (unico), `scade_il` (7 giorni), `accettato_il`, `accettato_da`, `creato_il`. Un nuovo invito alla stessa email sostituisce quello in sospeso |
 | `personaggi` | `id`, `partita_id`, `nome` e `sigla` (unici nella partita), `classe`, `colore`, `utente_id` (giocatore assegnato, facoltativo; `NULL` se lascia la partita o diventa osservatore), `posto` (indice in `partenze` dell'avventura), `x`, `y` |
@@ -548,7 +549,7 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 | 7 ✔ | **Nebbia di guerra** | Tabella `zone_scoperte` e pannello delle zone del Master. Copertura opaca per i giocatori e al 55% per il Master, senza intercettare i clic. All'avvio è scoperta solo la zona d'ingresso. I poligoni delle zone non scoperte non arrivano ai giocatori. Le sovrapposizioni segrete sono servite solo a zona scoperta. | RF-20…RF-25 |
 | 8 ✔ | **Mostri** | Tabella `mostri`. Il Master li aggiunge (tipo o "Altro", quantità, zona), li sposta e li toglie con conferma nell'interfaccia. I mostri ricevono sigle numerate e restano sotto la nebbia. I giocatori ricevono i dati di un mostro solo quando la sua zona è scoperta, anche alla scoperta successiva e sulle istantanee. | RF-40…RF-44 |
 | 9 ✔ | **Dadi e storico** | Tabella `tiri`. Tiro sul server con `crypto.randomInt`. Pulsanti da d4 a d100 e 3d6, numero di dadi, modificatore e motivo. Risultato in grande, con 20 naturale e 1 naturale evidenziati. Tiri nascosti visibili solo al Master. Storico degli ultimi 40 tiri. Svuotamento con conferma in due passaggi. | RF-50…RF-63 |
-| 10 | **Narrazione e backup** | Il Master pubblica e nasconde il testo "Il Master legge". Esportazione in JSON dello stato di una partita. | RF-70, RF-95 |
+| 10 ✔ | **Narrazione e backup** | Il Master pubblica e nasconde il testo "Il Master legge". Esportazione in JSON dello stato di una partita. | RF-70, RF-95 |
 
 ### Traguardo 3 — Rilascio dell'MVP
 
@@ -566,7 +567,7 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 
 > Sezione di passaggio tra una sessione di lavoro e l'altra. **All'inizio di una nuova sessione, Claude legge questa sezione, esegue i controlli di "Come ripartire" e pone all'utente le domande elencate sotto prima di scrivere codice.** Le voci risolte vanno tolte da qui e riportate nelle sezioni giuste del documento.
 
-**Ultimo aggiornamento:** 16/10/2026, fine sessione. Si riprende con lo **step 10**.
+**Ultimo aggiornamento:** 16/10/2026, fine sessione. Il **Traguardo 2 è completo**; si riprende con lo **step 12** (lo step 11 è stato tolto).
 
 ### Fatto
 
@@ -581,9 +582,14 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 | 6 | Mappa composta dal server (`sharp`), tabella `zone_scoperte`, tavolo SVG, pedine trascinabili (mouse, dito, frecce), evento `pedina:spostata`, "Giochi come", riporta all'ingresso, legenda | "step 6" |
 | 7 | Comando `zona:imposta` (solo Master), pannello "Zone", nebbia del Master al 55% senza intercettare i clic, zone e poligoni solo nell'istantanea del Master, segreti incollati nella mappa a zona scoperta | "Step 7 completo" |
 | 8 | Tabelle `mostri` e `mostri_sigle`, comandi dei mostri (solo Master), pannello "Mostri" (tipo o Altro, quantità, zona, togli uno o tutti), rombi rossi sotto la nebbia e trascinabili, filtro per zona scoperta | "step 7 completo" (0bdc20f) |
-| 9 | Tabella `tiri`, comandi `dadi:tira` e `tiri:svuota`, evento `dado:tirato`, dadi tirati sul server con `crypto.randomInt`, riquadri "Dadi" e "Storico dei tiri", tiri nascosti solo al Master | **da committare** (verificare con `git status`) |
+| 9 | Tabella `tiri`, comandi `dadi:tira` e `tiri:svuota`, evento `dado:tirato`, dadi tirati sul server con `crypto.randomInt`, riquadri "Dadi" e "Storico dei tiri", tiri nascosti solo al Master | "step 8 completo" (80db2f9) |
+| 10 | Tabella `narrazioni` e `partite.narrazione_id`, comandi della narrazione, evento `narrazione:cambiata`, riquadro "Il Master legge", pannello "Narrazione" con storico, `GET /api/partite/:id/backup` e "Esporta (JSON)" nella gestione | **da committare** (verificare con `git status`) |
 
-Ultima verifica: `npm run verifica` verde (113 test Vitest), `npm run test:e2e` verde (48 test Playwright su desktop e telefono).
+Ultima verifica: `npm run verifica` verde (117 test Vitest), `npm run test:e2e` verde (52 test Playwright su desktop e telefono).
+
+**Da sapere sullo step 10:**
+- **Narrazione:** il Master riceve `modificata`, perché cambia anche il suo storico dei testi; gli altri ricevono `narrazione:cambiata` con il testo. La bozza non esce dal browser del Master finché non la pubblica.
+- **Backup:** il JSON contiene le email (partecipanti, inviti in sospeso, Master), mai hash né token. Lo verifica un test che cerca `password|hash|token` nel file. Il link "Esporta (JSON)" nella pagina di gestione scarica direttamente dall'API (`download`), con `Cache-Control: private, no-store`.
 
 **Da sapere sullo step 9:**
 - Il client manda solo facce, numero, modificatore, motivo e `nascosto`: lo schema `ComandoTira` è `strict`, quindi risultati o personaggio inventati dal client vengono rifiutati (RF-63). Il personaggio è quello di "Giochi come" letto sul server.
@@ -605,39 +611,39 @@ Ultima verifica: `npm run verifica` verde (113 test Vitest), `npm run test:e2e` 
 - La scala grafica e il nord sono sotto la mappa, in HTML, perché quelli disegnati nell'immagine cadono fuori dalle zone scoperte. Il Master li vede due volte.
 
 **Database:**
-- **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_2000_tiri`, Sessione 0 importata, immagini in `dati/`. Primo Master creato il 16/10/2026 con `utente:crea-master`. Con `SMTP_HOST` vuoto l'email non parte: il link per la password è stato stampato a terminale (vale 7 giorni; in alternativa si usa "Password dimenticata", che stampa il link nel log del server);
+- **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_2200_narrazioni`, Sessione 0 importata, immagini in `dati/`. Primo Master creato il 16/10/2026 con `utente:crea-master`. Con `SMTP_HOST` vuoto l'email non parte: il link per la password è stato stampato a terminale (vale 7 giorni; in alternativa si usa "Password dimenticata", che stampa il link nel log del server);
 - **test** `dandzapp_test` su `127.0.0.1` (`DB_TEST_*`): lo usano Vitest e Playwright, che ne cancellano i dati.
 
 ### Come ripartire
 
-1. `git status`: se lo step 9 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
+1. `git status`: se lo step 10 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
 2. `npm install` (se è cambiato `package-lock.json`), poi `npm run verifica` e `npm run test:e2e`: devono essere verdi prima di toccare codice.
 3. `npm run db:migra` per allineare lo staging, se nel frattempo sono arrivate migrazioni.
 4. Per provare a mano: `npm run dev` → http://localhost:5173.
 
 ### Da chiedere all'utente all'inizio della prossima sessione
 
-1. **Testo della narrazione più lungo?** Proposta: fino a 2000 caratteri, testo semplice con gli a capo (niente formattazione), mostrato come testo e mai come HTML (RNF-06).
-2. **Storia della narrazione.** Pubblicando un nuovo testo, il precedente si perde? Proposta: sì, nell'MVP c'è un solo testo corrente, da pubblicare o nascondere (RF-70).
-3. **Cosa contiene il backup JSON** (RF-95)? Proposta: partita, avventura (solo lo slug), PG con le posizioni, partecipanti (nome e ruolo, **senza email**), zone scoperte, mostri, narrazione e tutti i tiri, nascosti compresi (è il Master che esporta).
+1. **Caratteri (RNF-03).** Oggi Marcellus SC, Alegreya Sans e JetBrains Mono vengono da Google Fonts (`apps/web/src/app.html`). Proposta: ospitarli nell'app (pacchetti `@fontsource/*`, una dipendenza nuova da approvare), così nessuna richiesta esterna rivela chi gioca, e la CSP della §15.5 può restare stretta (`font-src 'self'`).
+2. **Tema chiaro/scuro.** Basta seguire il dispositivo (RNF-03), o serve anche un interruttore manuale? Proposta: solo il dispositivo, come da requisito.
+3. **Pagina della partita su schermi grandi.** Oggi tutto è in colonna sotto la mappa. Proposta: oltre i 1100 px, mappa a sinistra e una colonna a destra con dadi e storico, così si tira senza scorrere. Sul telefono resta tutto impilato (RNF-02).
 
-### Prossimo passo: step 10, narrazione e backup
+### Prossimo passo: step 12, rifinitura
 
-Obiettivo (RF-70, RF-95).
+Obiettivo (RNF-02…RNF-09). Proposta di lavoro, da confermare con l'utente all'inizio:
 
-Proposta di lavoro, da confermare con l'utente all'inizio:
+1. **Responsive (RNF-02):**
+   - Playwright su larghezze 400, 768 e 1280 px: nessuno scorrimento orizzontale (`document.documentElement.scrollWidth <= innerWidth`) su tutte le pagine;
+   - la disposizione dei grandi schermi (domanda 3).
+2. **Tema e caratteri (RNF-03):** controllo della palette nei due temi, caratteri ospitati nell'app (domanda 1).
+3. **Accessibilità (RNF-04):**
+   - controllo automatico con `@axe-core/playwright` (dipendenza di sviluppo, da approvare) sulle pagine principali, nei due temi;
+   - focus visibile su tutti i controlli;
+   - `prefers-reduced-motion` rispettato;
+   - testi alternativi della mappa (c'è già un `desc`).
+4. **Sicurezza dei contenuti (RNF-06):** una ricerca di `{@html` nel codice (deve essere assente) e un e2e con `<script>` e `<img onerror>` nei nomi dei mostri, nei motivi dei tiri e nella narrazione.
+5. **Niente dialoghi del browser (RNF-09):**
+   - una regola ESLint `no-alert` e una ricerca di `confirm(`, `prompt(` e `alert(`;
+   - un e2e che fallisce se compare un `dialog` durante i flussi principali (`page.on('dialog')`).
+6. **Lessico BECMI (RNF-08):** rilettura dei testi dell'interfaccia.
 
-1. **Migrazione:** colonne `narrazione_testo` (TEXT, `NULL` = nascosto) e `narrazione_pubblicata_il` su `partite` (§15.4).
-2. **Comandi del Master:** `narrazione:pubblica` { testo } e `narrazione:nascondi`, via `comando()` + `modifica()`.
-   - Evento con i dati `narrazione:cambiata` { testo | null }, applicato dal client se la versione è la successiva attesa.
-   - L'istantanea porta `narrazione: { testo, pubblicataIl } | null`.
-   - Il Master vede la bozza solo nel proprio campo: finché non la pubblica, la bozza non esce dal suo browser.
-3. **Interfaccia:**
-   - riquadro "Il Master legge" sopra la mappa, in corsivo, con gli a capo rispettati (`white-space: pre-line`) e `aria-live`;
-   - per il Master: un'area di testo con "Pubblica" e "Nascondi".
-4. **Backup (RF-95):** `GET /api/partite/:id/backup` (solo Master), con `Content-Disposition: attachment` e il nome `partita-<id>-<data>.json`. Pulsante "Esporta (JSON)" nella pagina di gestione.
-5. **Test:**
-   - Vitest: solo il Master pubblica, nasconde ed esporta; la narrazione arriva a tutti; il backup non contiene email né hash e contiene i tiri nascosti; una partita altrui risponde 404;
-   - Playwright: il Master pubblica e la giocatrice legge il testo entro 3 secondi; il testo con `<b>` appare letteralmente.
-
-Dopo lo step 10: step 12 (rifinitura) e 13 (collaudo e messa in linea).
+Dopo lo step 12: step 13 (collaudo con la suite dei criteri della §12, configurazioni `deploy/`, messa in linea su Debian 13).

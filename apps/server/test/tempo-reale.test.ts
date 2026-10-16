@@ -690,3 +690,86 @@ describe('dadi e storico (RF-50…RF-63)', () => {
     expect(await storico(si)).toEqual([]);
   });
 });
+
+describe('narrazione "Il Master legge" (RF-70)', () => {
+  const pubblica = (s: Client, testo: string) =>
+    new Promise<RispostaComando>((ok) => s.emit('narrazione:pubblica', { testo }, ok));
+  const ripubblica = (s: Client, narrazioneId: number) =>
+    new Promise<RispostaComando>((ok) => s.emit('narrazione:ripubblica', { narrazioneId }, ok));
+  const elimina = (s: Client, narrazioneId: number) =>
+    new Promise<RispostaComando>((ok) => s.emit('narrazione:elimina', { narrazioneId }, ok));
+  const nascondi = (s: Client) =>
+    new Promise<RispostaComando>((ok) => s.emit('narrazione:nascondi', ok));
+  const stato = async (s: Client) => {
+    const r = await new Promise<RispostaIstantanea>((ok) => s.emit('partita:istantanea', ok));
+    if (!r.ok) throw new Error(r.errore);
+    return r.istantanea.dettaglio;
+  };
+
+  async function tavolo() {
+    const irene = await giocatore('irene@esempio.it');
+    const [sm, si] = [collega(master), collega(irene.token)];
+    await entra(sm);
+    await entra(si);
+    return { sm, si };
+  }
+
+  it('il Master pubblica e la giocatrice riceve subito il testo', async () => {
+    const { sm, si } = await tavolo();
+    const evento = prossimo(si, 'partita:evento');
+    const testo = 'La porta cigola.\nUn odore di muffa vi accoglie.';
+    expect(await pubblica(sm, `  ${testo}  `)).toEqual({ ok: true });
+    const [e] = await evento;
+    expect(e).toMatchObject({ tipo: 'narrazione:cambiata', narrazione: { testo } });
+    expect((await stato(si)).narrazione?.testo).toBe(testo);
+    // Lo storico dei testi è solo del Master.
+    expect((await stato(si)).narrazioni).toBeUndefined();
+    expect((await stato(sm)).narrazioni?.map((n) => n.testo)).toEqual([testo]);
+  });
+
+  it('nascondere, ripubblicare ed eliminare dallo storico', async () => {
+    const { sm, si } = await tavolo();
+    await pubblica(sm, 'Primo');
+    await pubblica(sm, 'Secondo');
+    const [secondo, primo] = (await stato(sm)).narrazioni ?? [];
+
+    expect(await nascondi(sm)).toEqual({ ok: true });
+    expect((await stato(si)).narrazione).toBeNull();
+    expect((await stato(sm)).narrazioni).toHaveLength(2);
+
+    expect(await ripubblica(sm, primo?.id ?? 0)).toEqual({ ok: true });
+    expect((await stato(si)).narrazione?.testo).toBe('Primo');
+    // Il testo ripubblicato torna in cima allo storico.
+    expect((await stato(sm)).narrazioni?.map((n) => n.testo)).toEqual(['Primo', 'Secondo']);
+
+    // Eliminare il testo mostrato lo toglie anche dal tavolo.
+    expect(await elimina(sm, primo?.id ?? 0)).toEqual({ ok: true });
+    expect((await stato(si)).narrazione).toBeNull();
+    expect((await stato(sm)).narrazioni?.map((n) => n.id)).toEqual([secondo?.id]);
+  });
+
+  it('solo il Master scrive; testi vuoti, troppo lunghi o altrui sono rifiutati', async () => {
+    const { sm, si } = await tavolo();
+    const vietato = { ok: false, errore: 'Solo il Master della partita può farlo' };
+    expect(await pubblica(si, 'Ciao')).toEqual(vietato);
+    expect(await nascondi(si)).toEqual(vietato);
+    const nonValido = { ok: false, errore: 'Comando non valido' };
+    expect(await pubblica(sm, '   ')).toEqual(nonValido);
+    expect(await pubblica(sm, 'x'.repeat(2001))).toEqual(nonValido);
+    expect(await ripubblica(sm, 999999)).toEqual({ ok: false, errore: 'Testo non trovato' });
+
+    // Un testo di un'altra partita non si tocca da questa.
+    const altra = (
+      await chiama(master, 'POST', '/api/partite', { titolo: 'Altra', avventura: 'sessione-0' })
+    ).json().id as number;
+    const s2 = collega(master);
+    await entra(s2, altra);
+    await pubblica(s2, 'Segreto');
+    const [segreto] = (await stato(s2)).narrazioni ?? [];
+    expect(await ripubblica(sm, segreto?.id ?? 0)).toEqual({
+      ok: false,
+      errore: 'Testo non trovato',
+    });
+    expect((await stato(si)).narrazione).toBeNull();
+  });
+});

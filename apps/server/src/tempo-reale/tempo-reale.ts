@@ -1,6 +1,8 @@
 import {
   ComandoAggiungiMostri,
   ComandoSpostaMostro,
+  ComandoNarrazione,
+  ComandoPubblicaNarrazione,
   ComandoSpostaPedina,
   ComandoTira,
   ComandoTogliMostro,
@@ -9,6 +11,7 @@ import {
   type EventiDalServer,
   type EventoPartita,
   type Istantanea,
+  type Narrazione,
   type PresenteAlTavolo,
   type RispostaComando,
   type RuoloInPartita,
@@ -26,6 +29,12 @@ import { ErroreHttp } from '../http/errori.ts';
 import { accessoPartita } from '../partite/accesso.ts';
 import { dettaglioPartita } from '../partite/partite.ts';
 import { aggiungiMostri, spostaMostro, togliMostro, togliTuttiIMostri } from '../partite/mostri.ts';
+import {
+  eliminaNarrazione,
+  nascondiNarrazione,
+  pubblicaNarrazione,
+  ripubblicaNarrazione,
+} from '../partite/narrazione.ts';
 import { impostaZona } from '../partite/nebbia.ts';
 import { svuotaTiri, tira } from '../partite/tiri.ts';
 import { riportaPedine, spostaPedina } from '../partite/pedine.ts';
@@ -425,6 +434,40 @@ export function avviaTempoReale(
       inSicurezza(
         comando(socket, risposta, 'master', async (partitaId) => {
           await modifica(partitaId, (trx) => svuotaTiri(trx, partitaId));
+        }),
+      ),
+    );
+
+    // Narrazione (RF-70): il Master si riallinea (cambia anche il suo storico dei testi),
+    // gli altri ricevono subito il testo da mostrare.
+    const narrazione = (
+      evento: 'narrazione:pubblica' | 'narrazione:ripubblica' | 'narrazione:elimina',
+      scrivi: (trx: Db, partitaId: number, dati: unknown) => Promise<Narrazione | null>,
+    ) =>
+      socket.on(evento, (dati: unknown, risposta: unknown) =>
+        inSicurezza(
+          comando(socket, risposta, 'master', async (partitaId) => {
+            await modifica(partitaId, (trx) => scrivi(trx, partitaId, dati), {
+              perGiocatori: (n) => ({ tipo: 'narrazione:cambiata', narrazione: n }),
+            });
+          }),
+        ),
+      );
+    narrazione('narrazione:pubblica', (trx, id, dati) =>
+      pubblicaNarrazione(trx, id, ComandoPubblicaNarrazione.parse(dati).testo, ora()),
+    );
+    narrazione('narrazione:ripubblica', (trx, id, dati) =>
+      ripubblicaNarrazione(trx, id, ComandoNarrazione.parse(dati).narrazioneId, ora()),
+    );
+    narrazione('narrazione:elimina', (trx, id, dati) =>
+      eliminaNarrazione(trx, id, ComandoNarrazione.parse(dati).narrazioneId),
+    );
+    socket.on('narrazione:nascondi', (risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          await modifica(partitaId, (trx) => nascondiNarrazione(trx, partitaId), {
+            perGiocatori: () => ({ tipo: 'narrazione:cambiata', narrazione: null }),
+          });
         }),
       ),
     );
