@@ -123,59 +123,68 @@
     {/if}
     {#if errore}<Avviso>{errore}</Avviso>{/if}
 
-    <MasterLegge {narrazione} />
+    <!-- Sugli schermi grandi: mappa a sinistra, dadi e storico a destra (RNF-02). -->
+    <div class="piano">
+      <div class="sinistra">
+        <MasterLegge {narrazione} />
 
-    <section class="tavolo" aria-label="Tavolo">
-      <div class="comandi">
-        {#if partita.mioRuolo === 'master'}
-          <p class="come">Giochi come: <strong>Master</strong></p>
-          <PulsanteConferma
-            testo="Riporta le pedine all'ingresso"
-            domanda="Riportare tutte le pedine ai posti di partenza?"
-            conferma="Riporta"
-            disabled={partita.stato !== 'attiva'}
-            onconferma={riportaPedine}
+        <section class="tavolo" aria-label="Tavolo">
+          <div class="comandi">
+            {#if partita.mioRuolo === 'master'}
+              <p class="come">Giochi come: <strong>Master</strong></p>
+              <PulsanteConferma
+                testo="Riporta le pedine all'ingresso"
+                domanda="Riportare tutte le pedine ai posti di partenza?"
+                conferma="Riporta"
+                disabled={partita.stato !== 'attiva'}
+                onconferma={riportaPedine}
+              />
+            {:else if partita.mioRuolo === 'giocatore'}
+              <Selettore
+                etichetta="Giochi come"
+                value={mioPersonaggioId ?? ''}
+                onchange={giochiCome}
+              >
+                <option value="">— nessun personaggio —</option>
+                {#each personaggi as pg (pg.id)}
+                  <option value={pg.id}>{pg.nome}</option>
+                {/each}
+              </Selettore>
+            {/if}
+          </div>
+          <Mappa
+            partitaId={partita.id}
+            {mappa}
+            {personaggi}
+            {zone}
+            {mostri}
+            puoMuovereMostri={partita.mioRuolo === 'master' && partita.stato === 'attiva'}
+            spostaMostro={(c) => collegamento.spostaMostro(c)}
+            {mioPersonaggioId}
+            {puoMuovere}
+            sposta={(c) => collegamento.spostaPedina(c)}
+            onerrore={(m) => (errore = m)}
           />
-        {:else if partita.mioRuolo === 'giocatore'}
-          <Selettore etichetta="Giochi come" value={mioPersonaggioId ?? ''} onchange={giochiCome}>
-            <option value="">— nessun personaggio —</option>
-            {#each personaggi as pg (pg.id)}
-              <option value={pg.id}>{pg.nome}</option>
-            {/each}
-          </Selettore>
-        {/if}
+        </section>
+
+        <RigaStato {collegamento} ruolo={partita.mioRuolo} />
       </div>
-      <Mappa
-        partitaId={partita.id}
-        {mappa}
-        {personaggi}
-        {zone}
-        {mostri}
-        puoMuovereMostri={partita.mioRuolo === 'master' && partita.stato === 'attiva'}
-        spostaMostro={(c) => collegamento.spostaMostro(c)}
-        {mioPersonaggioId}
-        {puoMuovere}
-        sposta={(c) => collegamento.spostaPedina(c)}
-        onerrore={(m) => (errore = m)}
-      />
-    </section>
 
-    <RigaStato {collegamento} ruolo={partita.mioRuolo} />
-
-    <div class="gioco">
-      {#if partita.mioRuolo !== 'osservatore'}
-        <Dadi
+      <div class="gioco">
+        {#if partita.mioRuolo !== 'osservatore'}
+          <Dadi
+            master={partita.mioRuolo === 'master'}
+            blocco={bloccoDadi}
+            tira={(c) => collegamento.tira(c)}
+          />
+        {/if}
+        <Storico
+          {tiri}
           master={partita.mioRuolo === 'master'}
-          blocco={bloccoDadi}
-          tira={(c) => collegamento.tira(c)}
+          svuota={() => collegamento.svuotaTiri()}
+          onerrore={(m) => (errore = m)}
         />
-      {/if}
-      <Storico
-        {tiri}
-        master={partita.mioRuolo === 'master'}
-        svuota={() => collegamento.svuotaTiri()}
-        onerrore={(m) => (errore = m)}
-      />
+      </div>
     </div>
 
     <div class="colonne">
@@ -253,7 +262,7 @@
 
 <style>
   main {
-    max-width: 60rem;
+    max-width: 84rem;
     margin: 0 auto;
     padding: 1.5rem 1rem;
   }
@@ -306,6 +315,20 @@
     gap: 1.5rem;
     margin-top: 1rem;
     align-items: start;
+  }
+  /* Abbastanza spazio: dadi e storico accanto alla mappa, così si tira senza scorrere. */
+  @media (min-width: 1100px) {
+    .piano {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 22rem;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    .piano .gioco {
+      grid-template-columns: 1fr;
+      position: sticky;
+      top: 1rem;
+    }
   }
   .colonne {
     display: grid;

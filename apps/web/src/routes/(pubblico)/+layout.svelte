@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import InterruttoreTema from '#lib/componenti/InterruttoreTema.svelte';
 
   let { children }: { children: Snippet } = $props();
 </script>
@@ -12,6 +13,7 @@
   <div class="scheda">
     {@render children()}
   </div>
+  <p class="tema"><InterruttoreTema /></p>
 </main>
 
 <style>
@@ -33,6 +35,10 @@
   header p {
     margin: 0.25rem 0 0;
     color: var(--testo-tenue);
+  }
+  .tema {
+    text-align: center;
+    margin-top: 1.5rem;
   }
   .scheda {
     background: var(--superficie);

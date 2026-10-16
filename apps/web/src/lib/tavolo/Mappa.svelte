@@ -292,8 +292,8 @@
       transform="translate({p.x} {p.y})"
       role={puoMuovere ? 'button' : 'img'}
       tabindex={puoMuovere ? 0 : undefined}
-      aria-label="{pg.nome}{mio ? ' (il tuo personaggio)' : ''}{puoMuovere
-        ? ': trascina o usa le frecce per spostarla'
+      aria-label="{pg.sigla}: {pg.nome}{mio ? ', il tuo personaggio' : ''}{puoMuovere
+        ? '. Trascina o usa le frecce per spostarla'
         : ''}"
       aria-roledescription="pedina"
       data-pedina={pg.sigla}

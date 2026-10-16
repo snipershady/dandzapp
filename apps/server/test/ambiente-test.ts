@@ -22,6 +22,7 @@ export function ambienteTest(): Record<string, string> {
     DB_USER: e['DB_TEST_USER'] ?? 'dandzapp_test',
     DB_PASSWORD: e['DB_TEST_PASSWORD'] ?? '',
     DB_NAME: nome,
-    SMTP_HOST: '',
+    // I test non spediscono mai email vere, qualunque cosa ci sia nel .env.
+    MAILER_DSN: '',
   };
 }

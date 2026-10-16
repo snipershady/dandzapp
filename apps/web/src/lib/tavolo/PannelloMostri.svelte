@@ -148,7 +148,7 @@
   }
   .riga {
     display: grid;
-    grid-template-columns: 6rem 1fr;
+    grid-template-columns: 6rem minmax(0, 1fr);
     gap: 0 0.75rem;
   }
   .primario {

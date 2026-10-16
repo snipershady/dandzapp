@@ -18,11 +18,18 @@ const SchemaConfig = z.object({
   DATA_DIR: z.string().default(''),
   LIMITE_TENTATIVI: z.stringbool().default(true),
   APP_URL: z.url().default('http://localhost:5173'),
-  SMTP_HOST: z.string().default(''),
-  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
-  SMTP_SECURE: z.stringbool().default(false),
-  SMTP_USER: z.string().default(''),
-  SMTP_PASSWORD: z.string().default(''),
+  /**
+   * Server di posta come DSN: `smtp://utente:password@host:porta` (STARTTLS se offerto)
+   * oppure `smtps://…` (TLS diretto, di solito porta 465). Vuoto = email solo nel log.
+   * Utente e password con caratteri speciali vanno codificati (es. `@` → `%40`).
+   */
+  MAILER_DSN: z
+    .string()
+    .trim()
+    .default('')
+    .refine((v) => v === '' || /^smtps?:\/\/[^/\s]+(:\d+)?\/?(\?.*)?$/.test(v), {
+      message: 'MAILER_DSN deve essere smtp://utente:password@host:porta o smtps://…',
+    }),
   EMAIL_MITTENTE: z.string().default('Tavolo virtuale <tavolo@localhost>'),
 });
 
@@ -34,8 +41,8 @@ export type Config = {
   db: { host: string; porta: number; utente: string; password: string; nome: string };
   /** Indirizzo pubblico dell'app, senza `/` finale: link nelle email e controllo dell'Origin. */
   urlApp: string;
-  /** `null` = nessun server SMTP: le email finiscono solo nel log. */
-  smtp: { host: string; porta: number; sicuro: boolean; utente: string; password: string } | null;
+  /** DSN del server di posta (MAILER_DSN); `null` = le email finiscono solo nel log. */
+  mailer: string | null;
   mittente: string;
   /** Limite di richieste per IP su accesso, registrazione e recupero (disattivato solo nell'e2e). */
   limiteTentativi: boolean;
@@ -46,12 +53,21 @@ export type Config = {
 };
 
 /**
- * Legge la configurazione dalle variabili d'ambiente. Il file `.env` alla radice
- * del repository, se presente, non sovrascrive le variabili già impostate.
+ * Legge la configurazione dalle variabili d'ambiente, completate da un file in formato
+ * `.env` che non sovrascrive le variabili già impostate:
+ * - quello indicato da `ENV_FILE` (in produzione `/etc/tavolo/tavolo.env`, §15.5), che
+ *   deve esistere;
+ * - altrimenti il `.env` alla radice del repository, se c'è (sviluppo).
  */
 export function caricaConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const fileEnv = `${radiceRepository}.env`;
-  if (env === process.env && existsSync(fileEnv)) process.loadEnvFile(fileEnv);
+  if (env === process.env) {
+    const indicato = env['ENV_FILE'];
+    if (indicato && !existsSync(indicato)) {
+      throw new Error(`ENV_FILE=${indicato}: il file non esiste`);
+    }
+    const fileEnv = indicato || `${radiceRepository}.env`;
+    if (existsSync(fileEnv)) process.loadEnvFile(fileEnv);
+  }
 
   const risultato = SchemaConfig.safeParse(env);
   if (!risultato.success) {
@@ -73,15 +89,7 @@ export function caricaConfig(env: NodeJS.ProcessEnv = process.env): Config {
       nome: c.DB_NAME,
     },
     urlApp: c.APP_URL.replace(/\/+$/, ''),
-    smtp: c.SMTP_HOST
-      ? {
-          host: c.SMTP_HOST,
-          porta: c.SMTP_PORT,
-          sicuro: c.SMTP_SECURE,
-          utente: c.SMTP_USER,
-          password: c.SMTP_PASSWORD,
-        }
-      : null,
+    mailer: c.MAILER_DSN || null,
     mittente: c.EMAIL_MITTENTE,
     limiteTentativi: c.LIMITE_TENTATIVI,
     cartellaDati: c.DATA_DIR || `${radiceRepository}dati`,

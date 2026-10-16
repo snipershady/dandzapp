@@ -20,6 +20,7 @@
     "db:migra": "npm run db:migra --workspace @dandzapp/server",
     "db:annulla": "npm run db:annulla --workspace @dandzapp/server",
     "utente:crea-master": "npm run utente:crea-master --workspace @dandzapp/server --",
+    "email:prova": "npm run email:prova --workspace @dandzapp/server --",
     "mappa:genera": "uv run --project strumenti/mappe python strumenti/mappe/genera_mappa.py",
     "avventura:importa": "npm run avventura:importa --workspace @dandzapp/server --",
     "test": "npm run test --workspaces --if-present",

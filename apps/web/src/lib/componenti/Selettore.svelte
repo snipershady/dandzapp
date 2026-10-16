@@ -32,11 +32,15 @@
     display: grid;
     gap: 0.3rem;
     margin-bottom: 1rem;
+    min-width: 0;
   }
   label {
     font-weight: 600;
   }
   select {
+    /* Opzioni lunghe (es. i nomi delle zone) non devono allargare la pagina (RNF-02). */
+    min-width: 0;
+    max-width: 100%;
     font: inherit;
     padding: 0.55rem 0.6rem;
     border: 1px solid var(--bordo);

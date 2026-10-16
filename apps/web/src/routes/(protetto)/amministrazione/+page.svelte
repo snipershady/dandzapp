@@ -197,8 +197,13 @@
     border: 1px solid var(--bordo);
     border-radius: 0.6rem;
   }
-  li.disattivo .identita {
-    opacity: 0.6;
+  /* Niente opacità: il testo deve restare leggibile (RNF-04). */
+  li.disattivo {
+    border-style: dashed;
+    background: var(--sfondo);
+  }
+  li.disattivo .identita strong {
+    text-decoration: line-through;
   }
   .identita {
     display: grid;

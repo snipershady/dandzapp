@@ -114,8 +114,10 @@
   .scheda:hover {
     border-color: var(--accento);
   }
+  /* Niente opacità: il testo deve restare leggibile (RNF-04). */
   .scheda.archiviata {
-    opacity: 0.7;
+    border-style: dashed;
+    background: var(--sfondo);
   }
   .titolo {
     font-family: var(--font-titoli);

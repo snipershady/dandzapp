@@ -11,6 +11,7 @@
     "test": "vitest run",
     "check": "tsc -p tsconfig.json",
     "utente:crea-master": "node src/cli/crea-master.ts",
+    "email:prova": "node src/cli/prova-email.ts",
     "avventura:importa": "node src/cli/importa-avventura.ts"
   },
   "dependencies": {

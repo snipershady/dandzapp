@@ -25,6 +25,16 @@ export default ts.config(
   {
     files: ['apps/web/**/*'],
     languageOptions: { globals: { ...globals.browser } },
+    rules: {
+      // RNF-09: niente alert/confirm/prompt, le conferme stanno nella pagina.
+      'no-alert': 'error',
+      'no-restricted-globals': ['error', 'alert', 'confirm', 'prompt'],
+    },
+  },
+  {
+    // RNF-06: i testi degli utenti si mostrano come testo, mai come HTML.
+    files: ['**/*.svelte'],
+    rules: { 'svelte/no-at-html-tags': 'error' },
   },
   {
     files: ['**/*.svelte', '**/*.svelte.ts'],

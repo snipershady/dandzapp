@@ -237,7 +237,7 @@ I dati che sono spoiler (mostri in zone coperte, zone non scoperte, tiri nascost
 
 - **RNF-01 Nessuna installazione** per i giocatori: si gioca da browser.
 - **RNF-02 Responsive:** utilizzabile fino a ~400 px di larghezza; su schermi stretti le colonne si impilano; nessuno scorrimento orizzontale della pagina.
-- **RNF-03 Tema chiaro e scuro** che segue le impostazioni del dispositivo. Palette: sabbia del deserto, papiro, lapislazzuli nithiano (accento), corniola (errori, 1 naturale). Caratteri: Marcellus SC (titoli), Alegreya Sans (testo), JetBrains Mono (dadi e numeri).
+- **RNF-03 Tema chiaro e scuro** che per impostazione segue il dispositivo, con un interruttore Automatico / Chiaro / Scuro salvato nel browser (decisione del 16/10/2026). Palette: sabbia del deserto, papiro, lapislazzuli nithiano (accento), corniola (errori, 1 naturale). Caratteri: Marcellus SC (titoli), Alegreya Sans (testo), JetBrains Mono (dadi e numeri), ospitati nell'app con `@fontsource` (nessuna richiesta a siti esterni).
 - **RNF-04 Accessibilità:** focus visibile da tastiera, contrasti adeguati, rispetto di "riduci movimento", testi alternativi per la mappa.
 - **RNF-05 Privacy:** il tavolo non è pubblico; accede solo chi è invitato.
 - **RNF-06 Sicurezza dei contenuti:** ogni testo inserito dagli utenti (motivi dei tiri, nomi dei mostri, narrazione) viene mostrato come testo, mai interpretato come HTML.
@@ -385,11 +385,11 @@ Vincolo: **MySQL 9.7** come unico database relazionale. Indicazioni di partenza:
 | Validazione | **Zod**, schemi condivisi tra client e server | Ogni comando in arrivo (REST o Socket.IO) è validato prima di toccare il DB. |
 | Password | **argon2id** (`@node-rs/argon2`) | Standard attuale per l'hashing. |
 | Sessioni | Cookie `httpOnly`, `Secure`, `SameSite=Lax` con token casuale; in DB solo l'hash del token | Revocabili (uscita, cambio password), lo stesso cookie autentica l'handshake di Socket.IO. Niente JWT. |
-| Email | **Nodemailer** via SMTP (inviti, recupero password); in sviluppo **Mailpit** | |
+| Email | **Nodemailer** via SMTP (inviti, recupero password), configurato con un solo parametro `MAILER_DSN` (`smtp://utente:password@host:porta` o `smtps://…`) nel file `.env`; in sviluppo Mailtrap (sandbox) o Mailpit | Cambiare servizio di posta = cambiare una riga. |
 | Test | **Vitest** (unità e integrazione, con MySQL reale di test), **Playwright** (end-to-end con più browser contemporanei per i criteri di §12) | |
 | Qualità | ESLint + Prettier (con plugin Svelte), `svelte-check`, `tsc --noEmit` | |
 | Monorepo | **npm workspaces** | Nessuno strumento in più. |
-| Hosting | Server **Debian 13** con **Apache2 oppure nginx** come proxy inverso, Node gestito da systemd, MySQL 9.7 (vedi §15.5) | Pochi euro al mese per molti gruppi (RNF-07). |
+| Hosting | Server **Debian 13** con **Apache2** in produzione (`dandzapp.spinfo.it`) e **nginx** nello staging, come proxy inverso; Node gestito da systemd, MySQL 9.7 (vedi §15.5 e `deploy/GUIDA.md`) | Pochi euro al mese per molti gruppi (RNF-07). |
 
 Scartati: `ws` puro (andrebbero riscritti rooms, riconnessione e ripiego); NestJS (troppo apparato per il progetto); Prisma (più pesante, SQL meno controllabile); Firebase/Supabase (esclusi dal vincolo MySQL); SSR di SvelteKit (doppio server e doppi controlli di permesso senza un vero vantaggio per un'app dietro accesso).
 
@@ -479,14 +479,15 @@ Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbo
                    MySQL 9.7 (solo locale)
 ```
 
-- **Ruolo del web server:** TLS, compressione, redirect da HTTP a HTTPS, intestazioni di sicurezza (HSTS, `X-Content-Type-Options`, CSP) e proxy verso Node. Non contiene logica dell'applicazione e non fa controlli di permesso.
+- **Ruolo del web server:** TLS, compressione, redirect da HTTP a HTTPS, intestazioni di sicurezza (HSTS, `X-Content-Type-Options`, CSP) e proxy verso Node. La CSP può essere stretta, perché l'app non carica nulla da siti esterni (caratteri compresi): `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'` (gli stili in linea servono a Svelte). Lo script di avvio che SvelteKit mette in linea nell'HTML va autorizzato con il suo hash (opzione `csp` di SvelteKit, oppure l'hash calcolato dalla build), non con `'unsafe-inline'`. Da fare e verificare allo step 13. Non contiene logica dell'applicazione e non fa controlli di permesso.
 - **WebSocket:** Socket.IO risponde sul percorso `/socket.io/`, e il proxy deve inoltrare l'upgrade.
   - **nginx:** `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade` e `proxy_set_header Connection "upgrade"`. Serve anche un `proxy_read_timeout` lungo (es. `3600s`), altrimenti nginx chiude i collegamenti inattivi.
   - **Apache2:** moduli `proxy`, `proxy_http`, `proxy_wstunnel`, `headers`, `ssl`, `rewrite`, con `ProxyPass / http://127.0.0.1:3000/ upgrade=websocket` (Apache ≥ 2.4.47, quindi va bene la versione di Debian 13) e `ProxyPreserveHost On`.
 - **Intestazioni inoltrate:** il proxy passa `X-Forwarded-For` e `X-Forwarded-Proto`. Fastify usa `trustProxy` limitato a `127.0.0.1`, così riconosce l'IP reale (per il limite ai tentativi di accesso) e l'HTTPS (cookie `Secure`).
 - **File statici:** la build della SPA (`apps/web/build`) può essere servita direttamente da Apache2/nginx per alleggerire Node. Le immagini delle avventure e le sovrapposizioni segrete **no**: passano sempre da Node, che verifica partecipazione e zona scoperta. Stanno fuori dalla `DocumentRoot` / `root`.
 - **Un solo processo Node:** non servono sessioni "appiccicose" (*sticky*) né bilanciamento. Se in futuro si passasse a più processi, andrebbero aggiunti entrambi, insieme all'adapter Redis di Socket.IO.
-- **Node 24:** Debian 13 fornisce una versione più vecchia di Node, quindi si installa Node 24 LTS dal repository NodeSource. Gira con un utente di sistema dedicato (es. `tavolo`) e un servizio systemd (`deploy/tavolo.service`) con `Restart=on-failure` e variabili prese da `/etc/tavolo/tavolo.env` (permessi 600).
+- **Node 24:** Debian 13 fornisce una versione più vecchia di Node, quindi si installa Node 24 LTS dal repository NodeSource. Gira con un utente di sistema dedicato (`tavolo`) e un servizio systemd (`deploy/systemd/tavolo.service`) con `Restart=on-failure`.
+- **Parametri:** stanno tutti in `/etc/tavolo/tavolo.env` (formato `.env`, `root:tavolo`, permessi 640; modello in `deploy/tavolo.env.esempio`). Il servizio passa `ENV_FILE=/etc/tavolo/tavolo.env` e `caricaConfig()` legge quel file al posto del `.env` del repository; anche i comandi lanciati con `deploy/comando.sh` usano `ENV_FILE`. Un solo posto da modificare, e nessun file letto dalla shell.
 - **MySQL 9.7:** Debian 13 fornisce MariaDB, non MySQL, quindi si installa dal repository APT ufficiale MySQL (`mysql-apt-config`). Va in ascolto solo su `127.0.0.1`, con un utente dedicato all'applicazione che ha i privilegi solo sul suo schema.
 - **Backup:** `mysqldump --single-transaction` notturno da un timer systemd, con rotazione, più una copia della cartella dati (`DATA_DIR`, immagini delle avventure importate).
 - **Aggiornamento:** `git pull`, `npm ci`, build, migrazioni, `systemctl restart tavolo`. Va scritto come script `deploy/aggiorna.sh`.
@@ -501,6 +502,7 @@ Elenco completo e primo avvio nel `README.md`. I principali:
 - CI in locale con [act](https://github.com/nektos/act): `act push -j verifica -P ubuntu-latest=catthehacker/ubuntu:act-latest`. Con act il job usa la rete dell'host, quindi il MySQL della CI è pubblicato sulla porta 3307 (la 3306 è del MySQL locale). Conviene lanciarlo da una copia pulita (`git worktree add`): act copia anche i file non salvati.
 - `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_TEST_*`. In locale è un database MySQL dedicato (`dandzapp_test` su `127.0.0.1`); in alternativa c'è il servizio Docker facoltativo `docker compose --profile db-test up -d`. I test ne cancellano i dati, quindi il nome deve finire con `_test`: il codice si rifiuta di procedere altrimenti. **Mai** puntare i test al database di sviluppo o di staging.
 - `npm run utente:crea-master -- email "Nome"`: crea il primo `ROLE_MASTER` senza password, oppure promuove un utente esistente. Stampa (e invia per email) un link valido 7 giorni per scegliere la password.
+- `npm run email:prova -- indirizzo`: spedisce un'email di prova con il server di `MAILER_DSN` (la password non compare mai nei messaggi). In produzione: `sudo deploy/comando.sh email:prova -- indirizzo`.
 - `npm run db:migra` / `npm run db:annulla`: migrazioni Kysely in `apps/server/src/db/migrazioni/`, con nome `AAAAMMGG_HHMM_descrizione.ts`. Ogni migrazione aggiorna anche `apps/server/src/db/schema.ts`.
 - `npm run mappa:genera -- avventure/<id>`: genera mappe e `avventura.json` da `dungeon.json` (richiede `uv`).
 - `npm run avventura:importa -- avventure/<id>`: importa o aggiorna un'avventura nel database indicato da `DB_*`, e le immagini in `DATA_DIR` (predefinita: `dati/` alla radice).
@@ -556,8 +558,8 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 | # | Step | Contenuto | Requisiti |
 | --- | --- | --- | --- |
 | 11 | ~~Chiedi a Claude~~ | Rimosso dall'MVP il 16/10/2026 (backlog §10, punto 12). Numerazione degli step lasciata invariata. | — |
-| 12 | **Rifinitura** | Interfaccia responsive fino a 400 px, tema chiaro/scuro con la palette e i caratteri, accessibilità (focus visibile, contrasti, riduci movimento, testi alternativi), nessun dialogo del browser, verifica che i testi degli utenti siano mostrati solo come testo. | RNF-02…RNF-09 |
-| 13 | **Collaudo e messa in linea** | Suite Playwright con i criteri della §12, giocata con più browser contemporanei (un Master, due giocatori, un non invitato). Test di sicurezza: comandi costruiti a mano da un `ROLE_PLAYER`, accesso a partite altrui, immagini segrete. Messa in linea su Debian 13 con Apache2 o nginx, systemd e MySQL 9.7 secondo la §15.5, con le configurazioni di esempio in `deploy/`. Partita di prova con il gruppo. | §12, RNF-07 |
+| 12 ✔ | **Rifinitura** | Interfaccia responsive fino a 400 px, tema chiaro/scuro con la palette e i caratteri, accessibilità (focus visibile, contrasti, riduci movimento, testi alternativi), nessun dialogo del browser, verifica che i testi degli utenti siano mostrati solo come testo. | RNF-02…RNF-09 |
+| 13 ✔ (file) | **Collaudo e messa in linea** | Suite Playwright con i criteri della §12, giocata con più browser contemporanei (un Master, due giocatori, un non invitato). Test di sicurezza: comandi costruiti a mano da un `ROLE_PLAYER`, accesso a partite altrui, immagini segrete. Messa in linea su Debian 13 con Apache2 o nginx, systemd e MySQL 9.7 secondo la §15.5, con le configurazioni di esempio in `deploy/`. Partita di prova con il gruppo. | §12, RNF-07 |
 
 Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di un'avventura dal pannello del Master).
 
@@ -567,7 +569,7 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 
 > Sezione di passaggio tra una sessione di lavoro e l'altra. **All'inizio di una nuova sessione, Claude legge questa sezione, esegue i controlli di "Come ripartire" e pone all'utente le domande elencate sotto prima di scrivere codice.** Le voci risolte vanno tolte da qui e riportate nelle sezioni giuste del documento.
 
-**Ultimo aggiornamento:** 16/10/2026, fine sessione. Il **Traguardo 2 è completo**; si riprende con lo **step 12** (lo step 11 è stato tolto).
+**Ultimo aggiornamento:** 16/10/2026, fine sessione. **L'MVP è completo nel codice.** Restano la messa in linea vera (la fa l'utente con `deploy/GUIDA.md`) e la partita di prova con il gruppo; poi si riparte dal backlog della §10.
 
 ### Fatto
 
@@ -583,9 +585,29 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 | 7 | Comando `zona:imposta` (solo Master), pannello "Zone", nebbia del Master al 55% senza intercettare i clic, zone e poligoni solo nell'istantanea del Master, segreti incollati nella mappa a zona scoperta | "Step 7 completo" |
 | 8 | Tabelle `mostri` e `mostri_sigle`, comandi dei mostri (solo Master), pannello "Mostri" (tipo o Altro, quantità, zona, togli uno o tutti), rombi rossi sotto la nebbia e trascinabili, filtro per zona scoperta | "step 7 completo" (0bdc20f) |
 | 9 | Tabella `tiri`, comandi `dadi:tira` e `tiri:svuota`, evento `dado:tirato`, dadi tirati sul server con `crypto.randomInt`, riquadri "Dadi" e "Storico dei tiri", tiri nascosti solo al Master | "step 8 completo" (80db2f9) |
-| 10 | Tabella `narrazioni` e `partite.narrazione_id`, comandi della narrazione, evento `narrazione:cambiata`, riquadro "Il Master legge", pannello "Narrazione" con storico, `GET /api/partite/:id/backup` e "Esporta (JSON)" nella gestione | **da committare** (verificare con `git status`) |
+| 10 | Tabella `narrazioni` e `partite.narrazione_id`, comandi della narrazione, evento `narrazione:cambiata`, riquadro "Il Master legge", pannello "Narrazione" con storico, `GET /api/partite/:id/backup` e "Esporta (JSON)" nella gestione | "step 8 completato" (0a2d0d2) |
+| 12 | Caratteri ospitati (`@fontsource`), colori con `light-dark()` e interruttore del tema, mappa a sinistra e dadi/storico a destra oltre 1100 px, regole ESLint `no-alert` e `svelte/no-at-html-tags`, correzioni di accessibilità, e2e `rifinitura.spec.ts` | **da committare** (verificare con `git status`) |
+| 13 | `MAILER_DSN` ed `email:prova`, `ENV_FILE`, CSP con hash (SvelteKit), caratteri mai incorporati come `data:`, e2e `collaudo.spec.ts` (criteri della §12) e `sicurezza.spec.ts`, cartella `deploy/` con `GUIDA.md` | **da committare** insieme allo step 12 |
 
-Ultima verifica: `npm run verifica` verde (117 test Vitest), `npm run test:e2e` verde (52 test Playwright su desktop e telefono).
+Ultima verifica: `npm run verifica` verde (121 test Vitest), `npm run test:e2e` verde (77 test Playwright; rifinitura e collaudo girano solo sul progetto desktop, perché creano da sé i contesti, telefono compreso).
+
+**Da sapere sullo step 13:**
+- **Collaudo:** `e2e/collaudo.spec.ts` ha un test per ogni casella della §12, in sequenza e con lo stato condiviso: un Master, Irene in due partite, Fabio al telefono (Pixel 7) e un estraneo. I comandi da Master costruiti a mano usano un client Socket.IO nel test con il cookie di Irene.
+- **CSP:** la scrive SvelteKit (`csp: { mode: 'hash' }` in `vite.config.ts`) in un `<meta>` con l'hash dello script di avvio. Apache2 e nginx aggiungono solo quello che un `<meta>` non può (`frame-ancestors`) più le altre intestazioni. Vite non incorpora i caratteri come `data:` (`assetsInlineLimit`), così `font-src 'self'` regge; l'e2e fallisce se la CSP blocca qualcosa.
+- **Prove dei file di `deploy/`**, fatte in un container `debian:trixie` (porte 8080/8443) davanti al server Node vero:
+  - `apache2/dandzapp.conf` (Apache 2.4.68) e `nginx/dandzapp-staging.conf` (nginx 1.26): configtest, 301 a HTTPS, rinnovo del certificato su HTTP, API, CSP, intestazioni, gzip, upgrade WebSocket (101), nessun file dei dati esposto;
+  - `backup.sh`, provato con il `mysqldump` di MySQL 9.7. Ha bisogno di `--set-gtid-purged=OFF` e `--skip-masking-policies` per funzionare con i soli privilegi sullo schema;
+  - shellcheck pulito su tutti gli script.
+- **Certificati:** la prima volta si ottengono con `certbot --webroot -w /var/www/html` mentre è attivo il sito predefinito di Debian. Le configurazioni servono la sfida ACME dalla stessa cartella, quindi i rinnovi continuano a funzionare.
+- **Nome dello staging:** non è ancora deciso. Nei file è `staging.dandzapp.spinfo.it`, da sostituire.
+
+**Da sapere sullo step 12:**
+- **Tema:** i colori sono definiti una volta sola con `light-dark(chiaro, scuro)` e seguono il `color-scheme`. L'interruttore imposta `data-tema` su `<html>` (`#lib/tema.svelte.ts`), con la scelta salvata in `localStorage`. Viene applicato nel layout radice prima del primo disegno, senza script in linea, così non serve allentare la CSP.
+- **Accessibilità:** `@axe-core/playwright` (dipendenza di sviluppo) controlla WCAG 2.1 AA su sette pagine nei due temi. Correzioni fatte:
+  - l'etichetta delle pedine comincia con la sigla visibile ("Sh: Shania…", regola `label-content-name-mismatch`);
+  - niente più `opacity` su account disattivati e partite archiviate, che falliva il contrasto: ora bordo tratteggiato e nome barrato.
+- **Responsive:** su tutte le pagine, a 400, 768 e 1280 px, la pagina non scorre in orizzontale. Il `Selettore` ora si restringe (`min-width: 0`), perché i nomi lunghi delle zone allargavano la pagina sul telefono.
+- **RNF-06 e RNF-09:** un e2e mette `<img onerror>`, `<script>`, `<b onmouseover>` e `<i>` nei nomi, nei motivi e nella narrazione. Verifica che compaiano come testo, che non si crei nessun elemento e che non si apra nessuna finestra del browser.
 
 **Da sapere sullo step 10:**
 - **Narrazione:** il Master riceve `modificata`, perché cambia anche il suo storico dei testi; gli altri ricevono `narrazione:cambiata` con il testo. La bozza non esce dal browser del Master finché non la pubblica.
@@ -611,39 +633,28 @@ Ultima verifica: `npm run verifica` verde (117 test Vitest), `npm run test:e2e` 
 - La scala grafica e il nord sono sotto la mappa, in HTML, perché quelli disegnati nell'immagine cadono fuori dalle zone scoperte. Il Master li vede due volte.
 
 **Database:**
+- **posta in sviluppo:** `MAILER_DSN` nel `.env` locale punta alla sandbox di Mailtrap (le credenziali stanno solo lì; il repository è pubblico). `npm run email:prova -- indirizzo` per provarla;
 - **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_2200_narrazioni`, Sessione 0 importata, immagini in `dati/`. Primo Master creato il 16/10/2026 con `utente:crea-master`. Con `SMTP_HOST` vuoto l'email non parte: il link per la password è stato stampato a terminale (vale 7 giorni; in alternativa si usa "Password dimenticata", che stampa il link nel log del server);
 - **test** `dandzapp_test` su `127.0.0.1` (`DB_TEST_*`): lo usano Vitest e Playwright, che ne cancellano i dati.
 
 ### Come ripartire
 
-1. `git status`: se lo step 10 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
+1. `git status`: se gli step 12 e 13 non sono ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
 2. `npm install` (se è cambiato `package-lock.json`), poi `npm run verifica` e `npm run test:e2e`: devono essere verdi prima di toccare codice.
 3. `npm run db:migra` per allineare lo staging, se nel frattempo sono arrivate migrazioni.
 4. Per provare a mano: `npm run dev` → http://localhost:5173.
 
 ### Da chiedere all'utente all'inizio della prossima sessione
 
-1. **Caratteri (RNF-03).** Oggi Marcellus SC, Alegreya Sans e JetBrains Mono vengono da Google Fonts (`apps/web/src/app.html`). Proposta: ospitarli nell'app (pacchetti `@fontsource/*`, una dipendenza nuova da approvare), così nessuna richiesta esterna rivela chi gioca, e la CSP della §15.5 può restare stretta (`font-src 'self'`).
-2. **Tema chiaro/scuro.** Basta seguire il dispositivo (RNF-03), o serve anche un interruttore manuale? Proposta: solo il dispositivo, come da requisito.
-3. **Pagina della partita su schermi grandi.** Oggi tutto è in colonna sotto la mappa. Proposta: oltre i 1100 px, mappa a sinistra e una colonna a destra con dadi e storico, così si tira senza scorrere. Sul telefono resta tutto impilato (RNF-02).
+1. **Messa in linea:** com'è andata seguendo `deploy/GUIDA.md`? Problemi o passi poco chiari vanno corretti nella guida.
+2. **Nome del server di staging** (al posto di `staging.dandzapp.spinfo.it` nei file di nginx).
+3. **Partita di prova con il gruppo:** cosa è emerso? Ogni problema di gioco va riportato nella §9 e trasformato in requisito.
+4. **Backlog (§10):** da quale punto ripartire? L'ordine previsto è: caricamento di un'avventura dal pannello del Master, editor delle zone, punti ferita dei mostri, iniziativa…
 
-### Prossimo passo: step 12, rifinitura
+### Prossimo passo
 
-Obiettivo (RNF-02…RNF-09). Proposta di lavoro, da confermare con l'utente all'inizio:
+L'MVP è completo nel codice. Restano due cose dell'utente:
+- la messa in linea con `deploy/GUIDA.md` (Apache2 in produzione su `dandzapp.spinfo.it`, nginx nello staging);
+- la partita di prova.
 
-1. **Responsive (RNF-02):**
-   - Playwright su larghezze 400, 768 e 1280 px: nessuno scorrimento orizzontale (`document.documentElement.scrollWidth <= innerWidth`) su tutte le pagine;
-   - la disposizione dei grandi schermi (domanda 3).
-2. **Tema e caratteri (RNF-03):** controllo della palette nei due temi, caratteri ospitati nell'app (domanda 1).
-3. **Accessibilità (RNF-04):**
-   - controllo automatico con `@axe-core/playwright` (dipendenza di sviluppo, da approvare) sulle pagine principali, nei due temi;
-   - focus visibile su tutti i controlli;
-   - `prefers-reduced-motion` rispettato;
-   - testi alternativi della mappa (c'è già un `desc`).
-4. **Sicurezza dei contenuti (RNF-06):** una ricerca di `{@html` nel codice (deve essere assente) e un e2e con `<script>` e `<img onerror>` nei nomi dei mostri, nei motivi dei tiri e nella narrazione.
-5. **Niente dialoghi del browser (RNF-09):**
-   - una regola ESLint `no-alert` e una ricerca di `confirm(`, `prompt(` e `alert(`;
-   - un e2e che fallisce se compare un `dialog` durante i flussi principali (`page.on('dialog')`).
-6. **Lessico BECMI (RNF-08):** rilettura dei testi dell'interfaccia.
-
-Dopo lo step 12: step 13 (collaudo con la suite dei criteri della §12, configurazioni `deploy/`, messa in linea su Debian 13).
+Dopo si riparte dal backlog della §10, punto 1: caricamento di una nuova avventura dal pannello del Master, senza intervento tecnico.

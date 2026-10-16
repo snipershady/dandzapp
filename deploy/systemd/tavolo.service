@@ -1,0 +1,37 @@
+# Servizio del Tavolo virtuale (§15.5).
+# Installazione: sudo cp deploy/systemd/tavolo.service /etc/systemd/system/
+#                sudo systemctl daemon-reload && sudo systemctl enable --now tavolo
+[Unit]
+Description=Tavolo virtuale D&D (Node.js)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=tavolo
+Group=tavolo
+WorkingDirectory=/opt/tavolo
+# Tutti i parametri stanno in questo file (formato .env), letto dall'applicazione.
+Environment=ENV_FILE=/etc/tavolo/tavolo.env
+ExecStart=/usr/bin/node apps/server/src/index.ts
+Restart=on-failure
+RestartSec=5
+# Chiusura ordinata: il server chiude i collegamenti e il database.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Protezioni: il servizio può scrivere solo nella cartella dei dati.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/tavolo
+
+[Install]
+WantedBy=multi-user.target

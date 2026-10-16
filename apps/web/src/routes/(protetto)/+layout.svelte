@@ -4,6 +4,7 @@
   import { page } from '$app/state';
   import type { Snippet } from 'svelte';
   import { api } from '#lib/api.ts';
+  import InterruttoreTema from '#lib/componenti/InterruttoreTema.svelte';
   import type { LayoutProps } from './$types';
 
   let { data, children }: LayoutProps & { children: Snippet } = $props();
@@ -30,6 +31,7 @@
     {utente.nome}
     <span class="ruolo">{utente.ruolo === 'ROLE_MASTER' ? 'Master' : 'Giocatore'}</span>
   </span>
+  <InterruttoreTema />
   <button type="button" onclick={esci}>Esci</button>
 </header>
 

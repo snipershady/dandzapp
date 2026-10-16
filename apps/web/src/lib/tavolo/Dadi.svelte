@@ -110,6 +110,7 @@
     margin-top: 0;
   }
   .dadi {
+    container-type: inline-size;
     background: var(--superficie);
     border: 1px solid var(--bordo);
     border-radius: 0.75rem;
@@ -132,7 +133,8 @@
     gap: 0.5rem;
     margin-top: 0.75rem;
   }
-  @media (max-width: 30rem) {
+  /* Riquadro stretto (telefono, o colonna accanto alla mappa): il motivo va a capo. */
+  @container (max-width: 26rem) {
     .campi {
       grid-template-columns: 1fr 1fr;
     }

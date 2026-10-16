@@ -1,0 +1,8 @@
+# Backup notturno: database (mysqldump) e cartella dei dati. Lo avvia tavolo-backup.timer.
+[Unit]
+Description=Backup del Tavolo virtuale
+After=mysql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tavolo/deploy/backup.sh
