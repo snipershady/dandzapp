@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DettaglioPartita, RuoloInPartita } from './partite.ts';
+import { DettaglioPartita, RuoloInPartita, type Tiro } from './partite.ts';
 
 /**
  * Protocollo Socket.IO del tavolo (§15.3). Il server è l'unica autorità: il client
@@ -42,7 +42,9 @@ export type EventoPartita =
   | { versione: number; tipo: 'modificata' }
   | { versione: number; tipo: 'pedina:spostata'; personaggioId: number; x: number; y: number }
   /** Solo al Master: la posizione salvata di un mostro (RF-43). */
-  | { versione: number; tipo: 'mostro:spostato'; mostroId: number; x: number; y: number };
+  | { versione: number; tipo: 'mostro:spostato'; mostroId: number; x: number; y: number }
+  /** Un tiro nuovo; quelli nascosti arrivano solo al Master (RF-54). */
+  | { versione: number; tipo: 'dado:tirato'; tiro: Tiro };
 
 /** Comando "sposta una pedina PG" (RF-31): coordinate della mappa, controllate dal server. */
 export const ComandoSpostaPedina = z
@@ -97,6 +99,26 @@ export type ComandoSpostaMostro = z.infer<typeof ComandoSpostaMostro>;
 export const ComandoTogliMostro = z.object({ mostroId: z.number().int().positive() }).strict();
 export type ComandoTogliMostro = z.infer<typeof ComandoTogliMostro>;
 
+/** Dadi disponibili (RF-50). */
+export const FACCE = [4, 6, 8, 10, 12, 20, 100] as const;
+
+/**
+ * Comando "tira i dadi" (RF-50, RF-51). Il client sceglie solo cosa tirare: risultati e
+ * personaggio li decide il server (RF-52, RF-63).
+ */
+export const ComandoTira = z
+  .object({
+    facce: z.union(FACCE.map((f) => z.literal(f))),
+    numero: z.number().int().min(1).max(20),
+    modificatore: z.number().int().min(-20).max(50),
+    motivo: z.string().trim().max(60, 'Il motivo può avere al massimo 60 caratteri').default(''),
+    nascosto: z.boolean().default(false),
+  })
+  .strict();
+export type ComandoTira = z.input<typeof ComandoTira>;
+
+export type RispostaTiro = { ok: true; tiro: Tiro } | { ok: false; errore: string };
+
 /** Esito di un comando inviato al server. */
 export type RispostaComando = { ok: true } | { ok: false; errore: string };
 
@@ -126,4 +148,8 @@ export interface EventiDalClient {
   'mostro:sposta': (comando: ComandoSpostaMostro, risposta: (r: RispostaComando) => void) => void;
   'mostro:togli': (comando: ComandoTogliMostro, risposta: (r: RispostaComando) => void) => void;
   'mostri:togli-tutti': (risposta: (r: RispostaComando) => void) => void;
+  /** Tiro di dadi (RF-50…RF-54): Master e giocatori con un PG scelto. */
+  'dadi:tira': (comando: ComandoTira, risposta: (r: RispostaTiro) => void) => void;
+  /** Solo Master: svuota lo storico dei tiri (RF-62). */
+  'tiri:svuota': (risposta: (r: RispostaComando) => void) => void;
 }

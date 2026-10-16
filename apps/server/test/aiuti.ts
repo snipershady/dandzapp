@@ -22,6 +22,7 @@ export type Contesto = {
 };
 
 const TABELLE = [
+  'tiri',
   'mostri_sigle',
   'mostri',
   'zone_scoperte',

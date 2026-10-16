@@ -1,5 +1,8 @@
 import {
   DettaglioPartita,
+  TIRI_NELLO_STORICO,
+  type ComandoTira,
+  type RispostaTiro,
   type ComandoAggiungiMostri,
   type ComandoSpostaMostro,
   type ComandoSpostaPedina,
@@ -142,20 +145,29 @@ export class Collegamento {
     return this.#comando((s, r) => s.emit('mostri:togli-tutti', r));
   }
 
-  #comando(
-    invia: (
-      socket: Socket<EventiDalServer, EventiDalClient>,
-      risposta: (r: RispostaComando) => void,
-    ) => void,
-  ): Promise<RispostaComando> {
+  /** Tira i dadi (RF-50…RF-54): il risultato lo decide il server. */
+  tira(comando: ComandoTira): Promise<RispostaTiro> {
+    return this.#comando((s, r) => s.emit('dadi:tira', comando, r));
+  }
+
+  /** Solo Master: svuota lo storico dei tiri (RF-62). */
+  svuotaTiri(): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('tiri:svuota', r));
+  }
+
+  /** Ogni risposta prevede il caso `{ ok: false, errore }`, usato anche qui sotto. */
+  #comando<R extends RispostaComando | RispostaTiro>(
+    invia: (socket: Socket<EventiDalServer, EventiDalClient>, risposta: (r: R) => void) => void,
+  ): Promise<R> {
+    const fallito = (errore: string) => ({ ok: false, errore }) as R;
     const socket = this.#socket;
     if (!socket?.connected) {
-      return Promise.resolve({ ok: false, errore: 'Non collegato al server: riprova tra poco' });
+      return Promise.resolve(fallito('Non collegato al server: riprova tra poco'));
     }
     return new Promise((fatto) => {
       // Senza risposta entro qualche secondo il comando si considera non riuscito.
       const timer = setTimeout(
-        () => fatto({ ok: false, errore: 'Il server non risponde: riprova' }),
+        () => fatto(fallito('Il server non risponde: riprova')),
         ATTESA_MAX_MS * 2,
       );
       invia(socket, (r) => {
@@ -176,16 +188,21 @@ export class Collegamento {
       void this.#riallinea();
       return;
     }
-    const segnalino =
-      evento.tipo === 'pedina:spostata'
-        ? this.dettaglio.personaggi.find((p) => p.id === evento.personaggioId)
-        : this.dettaglio.mostri.find((m) => m.id === evento.mostroId);
-    if (!segnalino) {
-      void this.#riallinea();
-      return;
+    if (evento.tipo === 'dado:tirato') {
+      const tiri = this.dettaglio.tiri.filter((t) => t.id !== evento.tiro.id);
+      this.dettaglio.tiri = [evento.tiro, ...tiri].slice(0, TIRI_NELLO_STORICO);
+    } else {
+      const segnalino =
+        evento.tipo === 'pedina:spostata'
+          ? this.dettaglio.personaggi.find((p) => p.id === evento.personaggioId)
+          : this.dettaglio.mostri.find((m) => m.id === evento.mostroId);
+      if (!segnalino) {
+        void this.#riallinea();
+        return;
+      }
+      segnalino.x = evento.x;
+      segnalino.y = evento.y;
     }
-    segnalino.x = evento.x;
-    segnalino.y = evento.y;
     this.dettaglio.versione = evento.versione;
     this.ultimoAggiornamento = Date.now();
   }

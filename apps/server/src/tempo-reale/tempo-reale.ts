@@ -2,6 +2,7 @@ import {
   ComandoAggiungiMostri,
   ComandoSpostaMostro,
   ComandoSpostaPedina,
+  ComandoTira,
   ComandoTogliMostro,
   ComandoZona,
   type EventiDalClient,
@@ -26,6 +27,7 @@ import { accessoPartita } from '../partite/accesso.ts';
 import { dettaglioPartita } from '../partite/partite.ts';
 import { aggiungiMostri, spostaMostro, togliMostro, togliTuttiIMostri } from '../partite/mostri.ts';
 import { impostaZona } from '../partite/nebbia.ts';
+import { svuotaTiri, tira } from '../partite/tiri.ts';
 import { riportaPedine, spostaPedina } from '../partite/pedine.ts';
 
 /** `Omit` che rispetta le unioni: toglie la chiave da ciascun membro. */
@@ -254,9 +256,10 @@ export function avviaTempoReale(
     socket: SocketTavolo,
     risposta: unknown,
     chi: 'gioca' | 'master',
-    azione: (partitaId: number) => Promise<void>,
+    /** Può restituire dati da aggiungere alla risposta (es. il tiro appena fatto). */
+    azione: (partitaId: number, ruolo: RuoloInPartita) => Promise<object | void>,
   ): Promise<void> {
-    const rispondi = (r: RispostaComando) => {
+    const rispondi = (r: RispostaComando | (RispostaComando & object)) => {
       if (typeof risposta === 'function') risposta(r);
     };
     const partitaId = socket.data.partitaId;
@@ -270,8 +273,8 @@ export function avviaTempoReale(
       if (partita.stato === 'archiviata') {
         throw new ErroreHttp(409, 'La partita è archiviata: è in sola lettura');
       }
-      await azione(partitaId);
-      rispondi({ ok: true });
+      const dati = await azione(partitaId, ruolo);
+      rispondi({ ...dati, ok: true });
     } catch (e) {
       if (e instanceof z.ZodError) return rispondi({ ok: false, errore: 'Comando non valido' });
       if (!(e instanceof ErroreHttp)) app.log.error(e);
@@ -395,6 +398,33 @@ export function avviaTempoReale(
           await modifica(partitaId, (trx) => togliTuttiIMostri(trx, partitaId), {
             perGiocatori: seVisibile,
           });
+        }),
+      ),
+    );
+
+    // Dadi (RF-50…RF-63). Un tiro pubblico arriva a tutti con i dati; uno nascosto solo al
+    // Master, e i giocatori non ne sanno nulla.
+    socket.on('dadi:tira', (dati, risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'gioca', async (partitaId, ruolo) => {
+          const c = ComandoTira.parse(dati);
+          const utenteId = socket.data.utente.id;
+          const tiro = await modifica(
+            partitaId,
+            (trx) => tira(trx, partitaId, utenteId, ruolo, c, ora()),
+            {
+              evento: (t) => ({ tipo: 'dado:tirato', tiro: t }),
+              perGiocatori: (t) => (t.nascosto ? null : { tipo: 'dado:tirato', tiro: t }),
+            },
+          );
+          return { tiro };
+        }),
+      ),
+    );
+    socket.on('tiri:svuota', (risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          await modifica(partitaId, (trx) => svuotaTiri(trx, partitaId));
         }),
       ),
     );

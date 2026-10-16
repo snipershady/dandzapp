@@ -10,9 +10,11 @@
   import AlTavolo from '#lib/tavolo/AlTavolo.svelte';
   import { Collegamento } from '#lib/tavolo/collegamento.svelte.ts';
   import Mappa from '#lib/tavolo/Mappa.svelte';
+  import Dadi from '#lib/tavolo/Dadi.svelte';
   import PannelloMostri from '#lib/tavolo/PannelloMostri.svelte';
   import PannelloZone from '#lib/tavolo/PannelloZone.svelte';
   import RigaStato from '#lib/tavolo/RigaStato.svelte';
+  import Storico from '#lib/tavolo/Storico.svelte';
   import { conPunti } from '#lib/testo.ts';
   import type { PageProps } from './$types';
 
@@ -25,7 +27,7 @@
     return () => collegamento.ferma();
   });
 
-  const { partita, mappa, personaggi, partecipanti, zone, mostri, tipiMostro } = $derived(
+  const { partita, mappa, personaggi, partecipanti, zone, mostri, tiri, tipiMostro } = $derived(
     collegamento.dettaglio,
   );
   const nomeDi = (id: number | null) => partecipanti.find((p) => p.utenteId === id)?.nome;
@@ -36,6 +38,14 @@
     partecipanti.find((p) => p.utenteId === data.utente.id)?.personaggioId ?? null,
   );
   const puoMuovere = $derived(partita.mioRuolo !== 'osservatore' && partita.stato === 'attiva');
+  /** Perché non si possono tirare i dadi: un giocatore deve aver scelto il suo PG. */
+  const bloccoDadi = $derived(
+    partita.stato !== 'attiva'
+      ? 'La partita è archiviata: non si tirano dadi.'
+      : partita.mioRuolo === 'giocatore' && mioPersonaggioId === null
+        ? 'Scegli il tuo personaggio in "Giochi come" per tirare i dadi.'
+        : null,
+  );
 
   async function giochiCome(evento: Event): Promise<void> {
     const valore = (evento.currentTarget as HTMLSelectElement).value;
@@ -138,6 +148,22 @@
     </section>
 
     <RigaStato {collegamento} ruolo={partita.mioRuolo} />
+
+    <div class="gioco">
+      {#if partita.mioRuolo !== 'osservatore'}
+        <Dadi
+          master={partita.mioRuolo === 'master'}
+          blocco={bloccoDadi}
+          tira={(c) => collegamento.tira(c)}
+        />
+      {/if}
+      <Storico
+        {tiri}
+        master={partita.mioRuolo === 'master'}
+        svuota={() => collegamento.svuotaTiri()}
+        onerrore={(m) => (errore = m)}
+      />
+    </div>
 
     <div class="colonne">
       {#if zone}
@@ -248,6 +274,13 @@
   }
   .come {
     margin: 0 0 1rem;
+  }
+  .gioco {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+    align-items: start;
   }
   .colonne {
     display: grid;

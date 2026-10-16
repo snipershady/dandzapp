@@ -11,6 +11,7 @@ import type {
   RispostaComando,
   RispostaEntra,
   RispostaIstantanea,
+  RispostaTiro,
 } from '@dandzapp/shared';
 import { io as ioClient, type Socket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -575,5 +576,117 @@ describe('mostri (RF-40…RF-44)', () => {
     });
     expect(await togli(sm, 999999)).toEqual({ ok: false, errore: 'Mostro non trovato' });
     expect((await istantanea(sm)).mostri).toHaveLength(1);
+  });
+});
+
+describe('dadi e storico (RF-50…RF-63)', () => {
+  const tira = (s: Client, c: Parameters<EventiDalClient['dadi:tira']>[0]) =>
+    new Promise<RispostaTiro>((ok) => s.emit('dadi:tira', c, ok));
+  const svuota = (s: Client) => new Promise<RispostaComando>((ok) => s.emit('tiri:svuota', ok));
+  const storico = async (s: Client) => {
+    const r = await new Promise<RispostaIstantanea>((ok) => s.emit('partita:istantanea', ok));
+    if (!r.ok) throw new Error(r.errore);
+    return r.istantanea.dettaglio.tiri;
+  };
+
+  /** Master e Irene al tavolo; Irene gioca come Shania. */
+  async function tavolo() {
+    const irene = await giocatore('irene@esempio.it');
+    await chiama(master, 'POST', `/api/partite/${partitaId}/personaggi`, {
+      nome: 'Shania',
+      sigla: 'Sh',
+      utenteId: irene.id,
+    });
+    const [sm, si] = [collega(master), collega(irene.token)];
+    await entra(sm);
+    await entra(si);
+    return { sm, si, irene };
+  }
+
+  it('il server tira i dadi e il tiro arriva a tutti con personaggio e account', async () => {
+    const { sm, si } = await tavolo();
+    const evento = prossimo(sm, 'partita:evento');
+    const r = await tira(si, { facce: 6, numero: 3, modificatore: 2, motivo: ' TS veleno ' });
+    if (!r.ok) throw new Error(r.errore);
+    const { tiro } = r;
+    expect(tiro).toMatchObject({
+      personaggio: 'Shania',
+      utente: 'irene',
+      motivo: 'TS veleno',
+      numero: 3,
+      facce: 6,
+      modificatore: 2,
+      nascosto: false,
+    });
+    expect(tiro.risultati).toHaveLength(3);
+    expect(tiro.risultati.every((v) => v >= 1 && v <= 6)).toBe(true);
+    expect(tiro.totale).toBe(tiro.risultati.reduce((a, b) => a + b, 0) + 2);
+    const [e] = await evento;
+    expect(e).toMatchObject({ tipo: 'dado:tirato', tiro: { id: tiro.id } });
+    expect((await storico(sm)).map((t) => t.id)).toEqual([tiro.id]);
+  });
+
+  it('un tiro nascosto del Master non arriva ai giocatori, né come evento né nello storico', async () => {
+    const { sm, si } = await tavolo();
+    const eventiIrene = registro(si, 'partita:evento');
+    const evento = prossimo(sm, 'partita:evento');
+    const r = await tira(sm, { facce: 20, numero: 1, modificatore: 0, nascosto: true });
+    if (!r.ok) throw new Error(r.errore);
+    expect(r.tiro).toMatchObject({ personaggio: 'Master', nascosto: true });
+    expect((await evento)[0]).toMatchObject({ tipo: 'dado:tirato', tiro: { nascosto: true } });
+    await attendi(200);
+    expect(eventiIrene).toEqual([]);
+    expect(await storico(si)).toEqual([]);
+    expect((await storico(sm)).map((t) => t.nascosto)).toEqual([true]);
+  });
+
+  it('servono un PG scelto, i permessi giusti e un comando valido', async () => {
+    const { si, sm } = await tavolo();
+    const luca = await giocatore('luca@esempio.it');
+    const osservatore = await giocatore('oscar@esempio.it', 'osservatore');
+    const [sl, so] = [collega(luca.token), collega(osservatore.token)];
+    await entra(sl);
+    await entra(so);
+    const d20 = { facce: 20, numero: 1, modificatore: 0 } as const;
+
+    expect(await tira(sl, d20)).toEqual({
+      ok: false,
+      errore: 'Scegli prima il tuo personaggio in "Giochi come"',
+    });
+    expect(await tira(so, d20)).toEqual({ ok: false, errore: 'Partecipi in sola lettura' });
+    expect(await tira(si, { ...d20, nascosto: true })).toEqual({
+      ok: false,
+      errore: 'Solo il Master può tirare di nascosto',
+    });
+    const nonValido = { ok: false, errore: 'Comando non valido' };
+    for (const sbagliato of [
+      { ...d20, facce: 7 },
+      { ...d20, numero: 21 },
+      { ...d20, modificatore: 51 },
+      { ...d20, motivo: 'x'.repeat(61) },
+      // Il client non può imporre risultati o personaggio (RF-63).
+      { ...d20, risultati: [20] },
+      { ...d20, personaggio: 'Annevar' },
+    ]) {
+      expect(await tira(si, sbagliato as never)).toEqual(nonValido);
+    }
+    expect(await storico(sm)).toEqual([]);
+  });
+
+  it('lo storico mostra gli ultimi 40, dal più recente; solo il Master lo svuota', async () => {
+    const { sm, si } = await tavolo();
+    const ids: number[] = [];
+    for (let i = 0; i < 42; i++) {
+      const r = await tira(i % 2 ? sm : si, { facce: 4, numero: 1, modificatore: 0 });
+      if (r.ok) ids.push(r.tiro.id);
+    }
+    expect((await storico(si)).map((t) => t.id)).toEqual(ids.reverse().slice(0, 40));
+
+    expect(await svuota(si)).toEqual({
+      ok: false,
+      errore: 'Solo il Master della partita può farlo',
+    });
+    expect(await svuota(sm)).toEqual({ ok: true });
+    expect(await storico(si)).toEqual([]);
   });
 });

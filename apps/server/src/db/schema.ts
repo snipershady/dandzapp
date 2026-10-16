@@ -22,6 +22,7 @@ export type Database = {
   zone_scoperte: TabellaZoneScoperte;
   mostri: TabellaMostri;
   mostri_sigle: TabellaMostriSigle;
+  tiri: TabellaTiri;
 };
 
 /** Colonna con valore predefinito: facoltativa in inserimento. */
@@ -142,4 +143,22 @@ export type TabellaMostriSigle = {
   partita_id: number;
   prefisso: string;
   ultimo: number;
+};
+
+export type TabellaTiri = {
+  id: Generated<number>;
+  partita_id: number;
+  utente_id: number;
+  personaggio_id: number | null;
+  personaggio_nome: string;
+  motivo: ConDefault<string>;
+  n_dadi: number;
+  facce: number;
+  modificatore: number;
+  /** mysql2 restituisce le colonne JSON già decodificate; in scrittura si passa la stringa. */
+  risultati: ColumnType<number[], string, string>;
+  totale: number;
+  /** MySQL restituisce i boolean come 0/1. */
+  nascosto: ColumnType<number, boolean | undefined, boolean>;
+  creato_il: ConDefault<Date>;
 };

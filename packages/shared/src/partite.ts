@@ -208,6 +208,29 @@ export const Mostro = z.object({
 });
 export type Mostro = z.infer<typeof Mostro>;
 
+/** Tiro di dado nello storico (RF-60). */
+export const Tiro = z.object({
+  id,
+  utenteId: id,
+  /** Nome dell'account che ha tirato. */
+  utente: z.string(),
+  /** Nome del PG al momento del tiro, oppure "Master". */
+  personaggio: z.string(),
+  motivo: z.string(),
+  numero: z.number().int(),
+  facce: z.number().int(),
+  modificatore: z.number().int(),
+  risultati: z.array(z.number().int()),
+  totale: z.number().int(),
+  /** Tiro nascosto del Master (RF-54): arriva solo al Master. */
+  nascosto: z.boolean(),
+  creatoIl: z.string(),
+});
+export type Tiro = z.infer<typeof Tiro>;
+
+/** Quanti tiri mostra lo storico del tavolo (RF-60). */
+export const TIRI_NELLO_STORICO = 40;
+
 export const DettaglioPartita = z.object({
   partita: RiepilogoPartita,
   /** Versione dello stato di gioco: cresce a ogni modifica (§15.3). */
@@ -224,6 +247,8 @@ export const DettaglioPartita = z.object({
    * (RF-42, RF-44).
    */
   mostri: z.array(Mostro),
+  /** Ultimi tiri, dal più recente; i nascosti solo per il Master (RF-60, RF-61). */
+  tiri: z.array(Tiro),
   /** Solo per il Master: i tipi di mostro previsti dall'avventura (RF-40). */
   tipiMostro: z.array(z.object({ nome: z.string(), sigla: z.string() })).optional(),
 });

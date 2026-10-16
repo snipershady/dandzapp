@@ -11,6 +11,7 @@ import { elencaInviti } from './inviti.ts';
 import { infoMappa } from './mappa.ts';
 import { elencaMostri, tipiMostro } from './mostri.ts';
 import { zoneDelMaster } from './nebbia.ts';
+import { elencaTiri } from './tiri.ts';
 import { elencaPartecipanti } from './partecipanti.ts';
 import { elencaPersonaggi } from './personaggi.ts';
 
@@ -106,7 +107,7 @@ export async function dettaglioPartita(
     .where('partite.id', '=', partitaId)
     .executeTakeFirstOrThrow();
   const master = ruolo === 'master';
-  const [mappa, personaggi, partecipanti, inviti, zone, mostri, tipi] = await Promise.all([
+  const [mappa, personaggi, partecipanti, inviti, zone, mostri, tiri, tipi] = await Promise.all([
     infoMappa(db, partitaId, ruolo),
     elencaPersonaggi(db, partitaId),
     elencaPartecipanti(db, partitaId),
@@ -115,6 +116,8 @@ export async function dettaglioPartita(
     master ? zoneDelMaster(db, partitaId) : undefined,
     // Ai giocatori solo i mostri nelle zone scoperte (RF-44).
     elencaMostri(db, partitaId, ruolo),
+    // I tiri nascosti solo al Master (RF-61).
+    elencaTiri(db, partitaId, ruolo),
     master ? tipiMostro(db, partitaId) : undefined,
   ]);
   return {
@@ -126,6 +129,7 @@ export async function dettaglioPartita(
     ...(inviti ? { inviti } : {}),
     ...(zone ? { zone } : {}),
     mostri,
+    tiri,
     ...(tipi ? { tipiMostro: tipi } : {}),
   };
 }
