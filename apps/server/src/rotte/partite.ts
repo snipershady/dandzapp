@@ -1,4 +1,6 @@
+import { createReadStream } from 'node:fs';
 import {
+  CorpoGiochiCome,
   CorpoInvito,
   CorpoModificaPartecipante,
   CorpoModificaPartita,
@@ -20,7 +22,12 @@ import { emailInvito } from '../email/modelli.ts';
 import { ErroreHttp, valida } from '../http/errori.ts';
 import { accessoPartita, richiediMasterPartita } from '../partite/accesso.ts';
 import { accettaInvito, creaInvito, infoInvito, revocaInvito } from '../partite/inviti.ts';
-import { cambiaRuoloPartecipante, rimuoviPartecipante } from '../partite/partecipanti.ts';
+import { fileMappa } from '../partite/mappa.ts';
+import {
+  cambiaRuoloPartecipante,
+  rimuoviPartecipante,
+  scegliPersonaggio,
+} from '../partite/partecipanti.ts';
 import {
   creaPartita,
   dettaglioPartita,
@@ -86,6 +93,21 @@ export function rottePartite(
     return risposta.code(204).send();
   });
 
+  /**
+   * Immagine della mappa (RF-10, §15.3): intera per il Master, con le sole zone scoperte
+   * per gli altri. Mai in cache condivise; il browser la riconvalida con l'ETag.
+   */
+  app.get('/api/partite/:id/mappa', async (richiesta, risposta) => {
+    const utente = richiediUtente(richiesta);
+    const { id } = valida(ParamPartita, richiesta.params);
+    const { ruolo } = await accessoPartita(db, id, utente.id);
+    const { file, chiave } = await fileMappa(db, config.cartellaDati, id, ruolo);
+    const etag = `"${chiave}"`;
+    risposta.header('Cache-Control', 'private, no-cache').header('ETag', etag);
+    if (richiesta.headers['if-none-match'] === etag) return risposta.code(304).send();
+    return risposta.type('image/png').send(createReadStream(file));
+  });
+
   // ---------------------------------------------------------------- personaggi
 
   app.post('/api/partite/:id/personaggi', async (richiesta, risposta) => {
@@ -142,6 +164,18 @@ export function rottePartite(
       utenteId,
       utenteId === utente.id ? 'Hai lasciato la partita' : 'Il Master ti ha tolto dalla partita',
     );
+    await tempoReale.notifica(id);
+    return risposta.code(204).send();
+  });
+
+  /** "Giochi come" (RF-03): il giocatore sceglie il proprio PG. */
+  app.put('/api/partite/:id/io', async (richiesta, risposta) => {
+    const utente = richiediUtente(richiesta);
+    const { id } = valida(ParamPartita, richiesta.params);
+    const { ruolo } = await accessoPartita(db, id, utente.id);
+    if (ruolo === 'master') throw new ErroreHttp(403, 'Il Master gioca come Master');
+    const { personaggioId } = valida(CorpoGiochiCome, richiesta.body);
+    await scegliPersonaggio(db, id, utente.id, personaggioId);
     await tempoReale.notifica(id);
     return risposta.code(204).send();
   });

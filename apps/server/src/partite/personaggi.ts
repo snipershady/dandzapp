@@ -12,6 +12,8 @@ function aPersonaggio(r: RigaPersonaggio): Personaggio {
     sigla: r.sigla,
     colore: r.colore,
     utenteId: r.utente_id,
+    x: r.x,
+    y: r.y,
   };
 }
 

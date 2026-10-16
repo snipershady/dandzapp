@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import {
   RispostaElencoPartite,
   RispostaInvitoCreato,
 } from '@dandzapp/shared';
+import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { importaAvventura } from '../src/avventure/importa.ts';
 import { DURATA_INVITO_MS } from '../src/partite/inviti.ts';
@@ -20,8 +21,9 @@ let ctx: Contesto;
 let temporanea: string;
 let master: string;
 beforeEach(async () => {
-  ctx = await creaContesto();
   temporanea = await mkdtemp(path.join(tmpdir(), 'dandzapp-partite-'));
+  // Le immagini dell'avventura (e le mappe composte) stanno nella cartella temporanea.
+  ctx = await creaContesto({ cartellaDati: temporanea });
   await importaAvventura(ctx.db, { cartella: SESSIONE_0, cartellaDati: temporanea });
   master = await registra(ctx.app, { email: 'marco@esempio.it', nome: 'Marco' });
   await creaOPromuoviMaster(ctx.db, { email: 'marco@esempio.it', nome: '' });
@@ -31,7 +33,7 @@ afterEach(async () => {
   await rm(temporanea, { recursive: true, force: true });
 });
 
-type Metodo = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type Metodo = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 const chiama = (token: string | null, method: Metodo, url: string, payload?: object) =>
   ctx.app.inject({
     method,
@@ -410,7 +412,9 @@ describe('partecipanti', () => {
     ).toBe(204);
 
     const d = await dettaglio(master, id);
-    expect(d.partecipanti).toEqual([{ utenteId: irene, nome: 'irene', ruolo: 'osservatore' }]);
+    expect(d.partecipanti).toEqual([
+      { utenteId: irene, nome: 'irene', ruolo: 'osservatore', personaggioId: null },
+    ]);
     expect(d.personaggi.map((p) => p.utenteId)).toEqual([null, null]);
   });
 
@@ -462,5 +466,119 @@ describe('gestione della partita', () => {
     for (const tabella of ['partite', 'personaggi', 'partecipazioni', 'inviti'] as const) {
       expect(await ctx.db.selectFrom(tabella).selectAll().execute()).toEqual([]);
     }
+  });
+});
+
+describe('mappa del tavolo (RF-10, §15.3)', () => {
+  /** Colore RGBA di un pixel di un PNG. */
+  async function pixel(png: Buffer, x: number, y: number): Promise<number[]> {
+    const { data, info } = await sharp(png)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const i = (y * info.width + x) * 4;
+    return [...data.subarray(i, i + 4)];
+  }
+  const mappa = (token: string, id: number) => chiama(token, 'GET', `/api/partite/${id}/mappa`);
+  // Punti interni alla Scala d'ingresso (zona iniziale) e al Sacrario del falco (coperto).
+  const INGRESSO = [480, 900] as const;
+  const SACRARIO = [380, 192] as const;
+
+  it('la partita nasce con le sole zone iniziali scoperte (RF-23)', async () => {
+    const id = await nuovaPartita();
+    const zone = await ctx.db.selectFrom('zone_scoperte').selectAll().execute();
+    expect(zone).toEqual([{ partita_id: id, zona_id: 'ingresso' }]);
+    const { mappa: info } = await dettaglio(master, id);
+    expect(info).toMatchObject({ larghezza: 1480, altezza: 1080, quadretto: { px: 40, metri: 3 } });
+  });
+
+  it('il Master riceve la mappa intera, i giocatori solo le zone scoperte', async () => {
+    const id = await nuovaPartita();
+    const { token } = await unisci(id, 'irene@esempio.it');
+    const originale = await readFile(
+      path.join(temporanea, 'avventure', 'sessione-0', 'mappa_giocatori.png'),
+    );
+
+    const delMaster = await mappa(master, id);
+    expect(delMaster.statusCode).toBe(200);
+    expect(delMaster.rawPayload.equals(originale)).toBe(true);
+
+    const r = await mappa(token, id);
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toBe('image/png');
+    expect((await pixel(r.rawPayload, ...SACRARIO))[3]).toBe(0);
+    expect(await pixel(r.rawPayload, ...INGRESSO)).toEqual(await pixel(originale, ...INGRESSO));
+
+    // Scoperta una zona, cambiano la chiave e l'immagine (il pannello arriva con lo step 7).
+    const prima = (await dettaglio(token, id)).mappa.chiave;
+    await ctx.db.insertInto('zone_scoperte').values({ partita_id: id, zona_id: 'sala3' }).execute();
+    expect((await dettaglio(token, id)).mappa.chiave).not.toBe(prima);
+    const dopo = await mappa(token, id);
+    expect(await pixel(dopo.rawPayload, ...SACRARIO)).toEqual(await pixel(originale, ...SACRARIO));
+  });
+
+  it('chi non partecipa riceve 404; la mappa non va nelle cache condivise', async () => {
+    const id = await nuovaPartita();
+    const estraneo = await registra(ctx.app, { email: 'estraneo@esempio.it' });
+    expect((await mappa(estraneo, id)).statusCode).toBe(404);
+    expect((await chiama(null, 'GET', `/api/partite/${id}/mappa`)).statusCode).toBe(401);
+
+    const { token } = await unisci(id, 'irene@esempio.it');
+    const r = await mappa(token, id);
+    expect(r.headers['cache-control']).toBe('private, no-cache');
+    const etag = String(r.headers['etag']);
+    const ancora = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/partite/${id}/mappa`,
+      cookies: { sessione: token },
+      headers: { 'if-none-match': etag },
+    });
+    expect(ancora.statusCode).toBe(304);
+    // Il Master ha un'immagine diversa, quindi un'altra chiave.
+    expect((await mappa(master, id)).headers['etag']).not.toBe(etag);
+  });
+});
+
+describe('"Giochi come" (RF-03)', () => {
+  it('il giocatore sceglie uno dei PG della partita, o nessuno', async () => {
+    const id = await nuovaPartita();
+    const { token, utenteId } = await unisci(id, 'irene@esempio.it');
+    const pg = (
+      await chiama(master, 'POST', `/api/partite/${id}/personaggi`, { nome: 'Shania', sigla: 'Sh' })
+    ).json().id as number;
+
+    expect(
+      (await chiama(token, 'PUT', `/api/partite/${id}/io`, { personaggioId: pg })).statusCode,
+    ).toBe(204);
+    const mia = async () =>
+      (await dettaglio(master, id)).partecipanti.find((p) => p.utenteId === utenteId);
+    expect((await mia())?.personaggioId).toBe(pg);
+    expect(
+      (await chiama(token, 'PUT', `/api/partite/${id}/io`, { personaggioId: null })).statusCode,
+    ).toBe(204);
+    expect((await mia())?.personaggioId).toBeNull();
+  });
+
+  it('rifiuta Master, osservatori, estranei e PG di altre partite', async () => {
+    const id = await nuovaPartita();
+    const altra = await nuovaPartita(master, 'Altra');
+    const pgAltra = (
+      await chiama(master, 'POST', `/api/partite/${altra}/personaggi`, {
+        nome: 'Duronin',
+        sigla: 'Du',
+      })
+    ).json().id as number;
+    const { token } = await unisci(id, 'irene@esempio.it');
+    const osservatore = await unisci(id, 'luca@esempio.it', { ruolo: 'osservatore' });
+    const estraneo = await registra(ctx.app, { email: 'estraneo@esempio.it' });
+    const io = (t: string, corpo: object) => chiama(t, 'PUT', `/api/partite/${id}/io`, corpo);
+
+    expect((await io(master, { personaggioId: null })).statusCode).toBe(403);
+    expect((await io(osservatore.token, { personaggioId: null })).statusCode).toBe(403);
+    expect((await io(estraneo, { personaggioId: null })).statusCode).toBe(404);
+    const r = await io(token, { personaggioId: pgAltra });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().campi).toEqual({ personaggioId: 'Personaggio inesistente' });
+    expect((await io(token, { personaggioId: 'Shania' })).statusCode).toBe(400);
   });
 });

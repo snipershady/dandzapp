@@ -1,9 +1,12 @@
 import {
   DettaglioPartita,
+  type ComandoSpostaPedina,
   type EventiDalClient,
   type EventiDalServer,
+  type EventoPartita,
   type Istantanea,
   type PresenteAlTavolo,
+  type RispostaComando,
 } from '@dandzapp/shared';
 import { io, type Socket } from 'socket.io-client';
 import { api, ErroreApi } from '#lib/api.ts';
@@ -72,11 +75,7 @@ export class Collegamento {
       if (this.stato !== 'scollegato') this.stato = 'riconnessione';
     });
 
-    socket.on('partita:evento', (evento) => {
-      if (evento.versione <= this.dettaglio.versione) return;
-      // Per ora ogni evento chiede di riallinearsi; dallo step 6 alcuni porteranno i dati.
-      void this.#riallinea();
-    });
+    socket.on('partita:evento', (evento) => this.#evento(evento));
     socket.on('partita:presenti', (presenti) => {
       this.presenti = presenti;
     });
@@ -106,6 +105,63 @@ export class Collegamento {
   async aggiornaOra(): Promise<void> {
     if (this.#socket?.connected) await this.#riallinea();
     else await this.#daApi();
+  }
+
+  /** Sposta la pedina di un PG (RF-31); la nuova posizione arriva a tutti con un evento. */
+  spostaPedina(comando: ComandoSpostaPedina): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('pedina:sposta', comando, r));
+  }
+
+  /** Solo Master: riporta le pedine ai posti di partenza (RF-34). */
+  riportaPedine(): Promise<RispostaComando> {
+    return this.#comando((s, r) => s.emit('pedine:riporta', r));
+  }
+
+  #comando(
+    invia: (
+      socket: Socket<EventiDalServer, EventiDalClient>,
+      risposta: (r: RispostaComando) => void,
+    ) => void,
+  ): Promise<RispostaComando> {
+    const socket = this.#socket;
+    if (!socket?.connected) {
+      return Promise.resolve({ ok: false, errore: 'Non collegato al server: riprova tra poco' });
+    }
+    return new Promise((fatto) => {
+      // Senza risposta entro qualche secondo il comando si considera non riuscito.
+      const timer = setTimeout(
+        () => fatto({ ok: false, errore: 'Il server non risponde: riprova' }),
+        ATTESA_MAX_MS * 2,
+      );
+      invia(socket, (r) => {
+        clearTimeout(timer);
+        fatto(r);
+      });
+    });
+  }
+
+  /**
+   * Un evento con i dati si applica solo se è il successivo atteso; se ne manca qualcuno
+   * si chiede l'istantanea. Gli eventi vecchi (già compresi in un'istantanea) si ignorano.
+   */
+  #evento(evento: EventoPartita): void {
+    const attesa = this.dettaglio.versione + 1;
+    if (evento.versione < attesa) return;
+    if (evento.versione > attesa || evento.tipo === 'modificata') {
+      void this.#riallinea();
+      return;
+    }
+    if (evento.tipo === 'pedina:spostata') {
+      const pg = this.dettaglio.personaggi.find((p) => p.id === evento.personaggioId);
+      if (!pg) {
+        void this.#riallinea();
+        return;
+      }
+      pg.x = evento.x;
+      pg.y = evento.y;
+    }
+    this.dettaglio.versione = evento.versione;
+    this.ultimoAggiornamento = Date.now();
   }
 
   #entra(): void {

@@ -5,9 +5,11 @@
   import { api, ErroreApi } from '#lib/api.ts';
   import Avviso from '#lib/componenti/Avviso.svelte';
   import PulsanteConferma from '#lib/componenti/PulsanteConferma.svelte';
+  import Selettore from '#lib/componenti/Selettore.svelte';
   import Pedina from '#lib/partita/Pedina.svelte';
   import AlTavolo from '#lib/tavolo/AlTavolo.svelte';
   import { Collegamento } from '#lib/tavolo/collegamento.svelte.ts';
+  import Mappa from '#lib/tavolo/Mappa.svelte';
   import RigaStato from '#lib/tavolo/RigaStato.svelte';
   import { conPunti } from '#lib/testo.ts';
   import type { PageProps } from './$types';
@@ -21,9 +23,34 @@
     return () => collegamento.ferma();
   });
 
-  const { partita, personaggi, partecipanti } = $derived(collegamento.dettaglio);
+  const { partita, mappa, personaggi, partecipanti } = $derived(collegamento.dettaglio);
   const nomeDi = (id: number | null) => partecipanti.find((p) => p.utenteId === id)?.nome;
   let errore = $state<string | null>(null);
+
+  /** "Giochi come" (RF-03): il Master è sempre "Master". */
+  const mioPersonaggioId = $derived(
+    partecipanti.find((p) => p.utenteId === data.utente.id)?.personaggioId ?? null,
+  );
+  const puoMuovere = $derived(partita.mioRuolo !== 'osservatore' && partita.stato === 'attiva');
+
+  async function giochiCome(evento: Event): Promise<void> {
+    const valore = (evento.currentTarget as HTMLSelectElement).value;
+    try {
+      await api(`/api/partite/${partita.id}/io`, {
+        metodo: 'PUT',
+        corpo: { personaggioId: valore ? Number(valore) : null },
+      });
+      errore = null;
+      await collegamento.aggiornaOra();
+    } catch (e) {
+      errore = e instanceof ErroreApi ? e.message : 'Operazione non riuscita';
+    }
+  }
+
+  async function riportaPedine(): Promise<void> {
+    const r = await collegamento.riportaPedine();
+    errore = r.ok ? null : r.errore;
+  }
 
   async function lascia(): Promise<void> {
     try {
@@ -71,19 +98,47 @@
     {/if}
     {#if errore}<Avviso>{errore}</Avviso>{/if}
 
-    <p class="tavolo">
-      Il tavolo di gioco (mappa, pedine, dadi) arriverà con i prossimi aggiornamenti.
-    </p>
+    <section class="tavolo" aria-label="Tavolo">
+      <div class="comandi">
+        {#if partita.mioRuolo === 'master'}
+          <p class="come">Giochi come: <strong>Master</strong></p>
+          <PulsanteConferma
+            testo="Riporta le pedine all'ingresso"
+            domanda="Riportare tutte le pedine ai posti di partenza?"
+            conferma="Riporta"
+            disabled={partita.stato !== 'attiva'}
+            onconferma={riportaPedine}
+          />
+        {:else if partita.mioRuolo === 'giocatore'}
+          <Selettore etichetta="Giochi come" value={mioPersonaggioId ?? ''} onchange={giochiCome}>
+            <option value="">— nessun personaggio —</option>
+            {#each personaggi as pg (pg.id)}
+              <option value={pg.id}>{pg.nome}</option>
+            {/each}
+          </Selettore>
+        {/if}
+      </div>
+      <Mappa
+        partitaId={partita.id}
+        {mappa}
+        {personaggi}
+        {mioPersonaggioId}
+        {puoMuovere}
+        sposta={(c) => collegamento.spostaPedina(c)}
+        onerrore={(m) => (errore = m)}
+      />
+    </section>
 
     <RigaStato {collegamento} ruolo={partita.mioRuolo} />
 
     <div class="colonne">
       <section aria-labelledby="pg">
+        <!-- Legenda delle pedine (RF-35). -->
         <h2 id="pg">Personaggi</h2>
         {#if personaggi.length}
           <ul class="elenco">
             {#each personaggi as pg (pg.id)}
-              <li class:mio={pg.utenteId === data.utente.id}>
+              <li class:mio={pg.id === mioPersonaggioId}>
                 <Pedina colore={pg.colore} sigla={pg.sigla} nome={pg.nome} />
                 <span>
                   <span class="riga"
@@ -156,10 +211,17 @@
     border-radius: 0.5rem;
   }
   .tavolo {
-    background: var(--superficie);
-    border: 1px dashed var(--bordo);
-    border-radius: 0.75rem;
-    padding: 1rem 1.5rem;
+    margin-top: 1rem;
+  }
+  .comandi {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 0 1rem;
+  }
+  .come {
+    margin: 0 0 1rem;
   }
   .colonne {
     display: grid;
@@ -184,8 +246,8 @@
     border-radius: 0.5rem;
   }
   .elenco li.mio {
-    border-color: #c9a227;
-    box-shadow: 0 0 0 1px #c9a227;
+    border-color: var(--oro);
+    box-shadow: 0 0 0 1px var(--oro);
   }
   .giocatore {
     display: block;

@@ -22,6 +22,7 @@ export type Contesto = {
 };
 
 const TABELLE = [
+  'zone_scoperte',
   'inviti',
   'partecipazioni',
   'personaggi',
@@ -33,8 +34,8 @@ const TABELLE = [
 ] as const;
 
 /** App con database di test vuoto, posta finta e orologio controllabile. */
-export async function creaContesto(): Promise<Contesto> {
-  const config = configTest();
+export async function creaContesto(modifiche: Partial<Config> = {}): Promise<Contesto> {
+  const config = configTest(modifiche);
   if (!config.db.nome.endsWith('_test')) {
     throw new Error(`Rifiuto di svuotare "${config.db.nome}": non è un database di test`);
   }

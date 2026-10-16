@@ -1,9 +1,12 @@
-import type {
-  EventiDalClient,
-  EventiDalServer,
-  Istantanea,
-  PresenteAlTavolo,
-  RuoloInPartita,
+import {
+  ComandoSpostaPedina,
+  type EventiDalClient,
+  type EventiDalServer,
+  type EventoPartita,
+  type Istantanea,
+  type PresenteAlTavolo,
+  type RispostaComando,
+  type RuoloInPartita,
 } from '@dandzapp/shared';
 import type { FastifyInstance } from 'fastify';
 import { Server, type Socket } from 'socket.io';
@@ -17,6 +20,10 @@ import type { RigaUtente } from '../db/schema.ts';
 import { ErroreHttp } from '../http/errori.ts';
 import { accessoPartita } from '../partite/accesso.ts';
 import { dettaglioPartita } from '../partite/partite.ts';
+import { riportaPedine, spostaPedina } from '../partite/pedine.ts';
+
+/** `Omit` che rispetta le unioni: toglie la chiave da ciascun membro. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 type DatiSocket = { utente: RigaUtente; tokenHash: string; partitaId: number | null };
 type SocketTavolo = Socket<EventiDalClient, EventiDalServer, Record<string, never>, DatiSocket>;
@@ -173,6 +180,81 @@ export function avviaTempoReale(
   const messaggio = (e: unknown) =>
     e instanceof ErroreHttp ? e.message : 'Errore del server: riprova';
 
+  /**
+   * Esegue `scrivi` e incrementa la versione della partita nella stessa transazione, con
+   * la riga della partita bloccata: le versioni seguono l'ordine delle scritture, e i dati
+   * di un evento sono proprio quelli della sua versione. Dopo il commit diffonde l'evento.
+   */
+  async function modifica<T>(
+    partitaId: number,
+    scrivi: (trx: Db) => Promise<T>,
+    {
+      soloMaster = false,
+      evento = () => ({ tipo: 'modificata' }),
+    }: {
+      soloMaster?: boolean;
+      evento?: (risultato: T) => DistributiveOmit<EventoPartita, 'versione'>;
+    } = {},
+  ): Promise<T | null> {
+    const esito = await db.transaction().execute(async (trx) => {
+      const riga = await trx
+        .selectFrom('partite')
+        .select('versione')
+        .where('id', '=', partitaId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!riga) return null;
+      const risultato = await scrivi(trx);
+      const versione = Number(riga.versione) + 1;
+      await trx
+        .updateTable('partite')
+        .set({ versione, aggiornata_il: ora() })
+        .where('id', '=', partitaId)
+        .execute();
+      return { risultato, versione };
+    });
+    if (esito === null) return null;
+    const { risultato, versione } = esito;
+    // Chi non riceve l'evento (i giocatori, per le modifiche riservate al Master) vedrà
+    // comunque un salto di versione alla prossima modifica e chiederà un'istantanea.
+    const dati: EventoPartita = { ...evento(risultato), versione };
+    io.to(soloMaster ? stanzaMaster(partitaId) : stanza(partitaId)).emit('partita:evento', dati);
+    return risultato;
+  }
+
+  /**
+   * Comando di gioco da un socket: i permessi si ricontrollano a ogni comando (il ruolo
+   * può essere cambiato nel frattempo), e una partita archiviata è in sola lettura.
+   */
+  async function comando(
+    socket: SocketTavolo,
+    risposta: unknown,
+    chi: 'gioca' | 'master',
+    azione: (partitaId: number) => Promise<void>,
+  ): Promise<void> {
+    const rispondi = (r: RispostaComando) => {
+      if (typeof risposta === 'function') risposta(r);
+    };
+    const partitaId = socket.data.partitaId;
+    if (partitaId === null) return rispondi({ ok: false, errore: 'Non sei in una partita' });
+    try {
+      const { partita, ruolo } = await accessoPartita(db, partitaId, socket.data.utente.id);
+      if (chi === 'master' && ruolo !== 'master') {
+        throw new ErroreHttp(403, 'Solo il Master della partita può farlo');
+      }
+      if (ruolo === 'osservatore') throw new ErroreHttp(403, 'Partecipi in sola lettura');
+      if (partita.stato === 'archiviata') {
+        throw new ErroreHttp(409, 'La partita è archiviata: è in sola lettura');
+      }
+      await azione(partitaId);
+      rispondi({ ok: true });
+    } catch (e) {
+      if (e instanceof z.ZodError) return rispondi({ ok: false, errore: 'Comando non valido' });
+      if (!(e instanceof ErroreHttp)) app.log.error(e);
+      rispondi({ ok: false, errore: messaggio(e) });
+    }
+  }
+
   io.on('connection', (socket) => {
     socket.on('partita:entra', async (id, risposta) => {
       try {
@@ -218,6 +300,25 @@ export function avviaTempoReale(
       }
     });
 
+    // Pedine dei PG (RF-31, RF-34): le muovono il Master e i giocatori, non gli osservatori.
+    socket.on('pedina:sposta', (dati, risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'gioca', async (partitaId) => {
+          const c = ComandoSpostaPedina.parse(dati);
+          await modifica(partitaId, (trx) => spostaPedina(trx, partitaId, c), {
+            evento: () => ({ tipo: 'pedina:spostata', ...c }),
+          });
+        }),
+      ),
+    );
+    socket.on('pedine:riporta', (risposta) =>
+      inSicurezza(
+        comando(socket, risposta, 'master', async (partitaId) => {
+          await modifica(partitaId, (trx) => riportaPedine(trx, partitaId));
+        }),
+      ),
+    );
+
     socket.on('partita:esci', () => inSicurezza(lascia(socket)));
     socket.on('disconnecting', () => inSicurezza(lascia(socket)));
   });
@@ -229,29 +330,7 @@ export function avviaTempoReale(
 
   return {
     async notifica(partitaId, { soloMaster = false } = {}) {
-      const versione = await db.transaction().execute(async (trx) => {
-        const riga = await trx
-          .selectFrom('partite')
-          .select('versione')
-          .where('id', '=', partitaId)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!riga) return null;
-        const nuova = Number(riga.versione) + 1;
-        await trx
-          .updateTable('partite')
-          .set({ versione: nuova, aggiornata_il: ora() })
-          .where('id', '=', partitaId)
-          .execute();
-        return nuova;
-      });
-      if (versione === null) return;
-      // Chi non riceve l'evento (i giocatori, per le modifiche riservate al Master) vedrà
-      // comunque un salto di versione alla prossima modifica e chiederà un'istantanea.
-      io.to(soloMaster ? stanzaMaster(partitaId) : stanza(partitaId)).emit('partita:evento', {
-        versione,
-        tipo: 'modificata',
-      });
+      await modifica(partitaId, async () => true, { soloMaster });
       // Ruoli e "Giochi come" possono essere cambiati: si aggiorna anche la presenza.
       if (!soloMaster) await annunciaPresenti(partitaId);
     },

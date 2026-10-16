@@ -8,6 +8,7 @@ import type {
 import type { Db } from '../db/database.ts';
 import { ErroreHttp } from '../http/errori.ts';
 import { elencaInviti } from './inviti.ts';
+import { infoMappa } from './mappa.ts';
 import { elencaPartecipanti } from './partecipanti.ts';
 import { elencaPersonaggi } from './personaggi.ts';
 
@@ -73,17 +74,25 @@ export async function creaPartita(
 ): Promise<number> {
   const riga = await db
     .selectFrom('avventure')
-    .select('id')
+    .select(['id', 'definizione'])
     .where('slug', '=', avventura)
     .executeTakeFirst();
   if (!riga) {
     throw new ErroreHttp(400, 'Controlla i dati inseriti', { avventura: 'Avventura inesistente' });
   }
-  const { insertId } = await db
-    .insertInto('partite')
-    .values({ titolo, master_id: masterId, avventura_id: riga.id })
-    .executeTakeFirstOrThrow();
-  return Number(insertId);
+  return db.transaction().execute(async (trx) => {
+    const { insertId } = await trx
+      .insertInto('partite')
+      .values({ titolo, master_id: masterId, avventura_id: riga.id })
+      .executeTakeFirstOrThrow();
+    const partitaId = Number(insertId);
+    // All'avvio è scoperta solo la zona d'ingresso (RF-23).
+    await trx
+      .insertInto('zone_scoperte')
+      .values(riga.definizione.zoneIniziali.map((zona_id) => ({ partita_id: partitaId, zona_id })))
+      .execute();
+    return partitaId;
+  });
 }
 
 export async function dettaglioPartita(
@@ -94,7 +103,8 @@ export async function dettaglioPartita(
   const riepilogo = await queryRiepiloghi(db)
     .where('partite.id', '=', partitaId)
     .executeTakeFirstOrThrow();
-  const [personaggi, partecipanti, inviti] = await Promise.all([
+  const [mappa, personaggi, partecipanti, inviti] = await Promise.all([
+    infoMappa(db, partitaId, ruolo),
     elencaPersonaggi(db, partitaId),
     elencaPartecipanti(db, partitaId),
     ruolo === 'master' ? elencaInviti(db, partitaId, new Date()) : undefined,
@@ -102,6 +112,7 @@ export async function dettaglioPartita(
   return {
     partita: aRiepilogo(riepilogo, ruolo),
     versione: Number(riepilogo.versione),
+    mappa,
     personaggi,
     partecipanti,
     ...(inviti ? { inviti } : {}),

@@ -24,6 +24,10 @@
     --errore-sfondo: #f7e1dd;
     --successo: #3e6b2a;
     --successo-sfondo: #e4eed9;
+    /* Tavolo: nebbia sulle zone non scoperte e bordo della propria pedina (RF-32). */
+    --nebbia: #3a3128;
+    --nebbia-griglia: rgb(239 228 204 / 0.08);
+    --oro: #d4a017;
     --font-titoli: 'Marcellus SC', Georgia, serif;
     --font-testo: 'Alegreya Sans', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -42,6 +46,9 @@
       --errore-sfondo: #3a201c;
       --successo: #9fcf86;
       --successo-sfondo: #1f2e19;
+      --nebbia: #0f0d0a;
+      --nebbia-griglia: rgb(239 228 204 / 0.06);
+      --oro: #e8c04a;
       color-scheme: dark;
     }
   }

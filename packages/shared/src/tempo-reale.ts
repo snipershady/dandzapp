@@ -33,8 +33,27 @@ export type RispostaIstantanea =
 
 export type RispostaVersione = { ok: true; versione: number } | { ok: false; errore: string };
 
-/** Tipi di evento: per ora solo "qualcosa è cambiato, riallineati". Gli step 6–10 ne aggiungono. */
-export type EventoPartita = { versione: number; tipo: 'modificata' };
+/**
+ * Eventi numerati con la versione della partita. `modificata` chiede solo di riallinearsi
+ * (il client chiede l'istantanea); gli altri portano i dati, e il client li applica solo
+ * se la loro versione è la successiva a quella che ha.
+ */
+export type EventoPartita =
+  | { versione: number; tipo: 'modificata' }
+  | { versione: number; tipo: 'pedina:spostata'; personaggioId: number; x: number; y: number };
+
+/** Comando "sposta una pedina PG" (RF-31): coordinate della mappa, controllate dal server. */
+export const ComandoSpostaPedina = z
+  .object({
+    personaggioId: z.number().int().positive(),
+    x: z.number().finite().nonnegative(),
+    y: z.number().finite().nonnegative(),
+  })
+  .strict();
+export type ComandoSpostaPedina = z.infer<typeof ComandoSpostaPedina>;
+
+/** Esito di un comando inviato al server. */
+export type RispostaComando = { ok: true } | { ok: false; errore: string };
 
 export interface EventiDalServer {
   'partita:evento': (evento: EventoPartita) => void;
@@ -49,4 +68,7 @@ export interface EventiDalClient {
   'partita:istantanea': (risposta: (r: RispostaIstantanea) => void) => void;
   'partita:versione': (risposta: (r: RispostaVersione) => void) => void;
   'partita:esci': () => void;
+  'pedina:sposta': (comando: ComandoSpostaPedina, risposta: (r: RispostaComando) => void) => void;
+  /** Solo Master: riporta tutte le pedine dei PG ai posti di partenza (RF-34). */
+  'pedine:riporta': (risposta: (r: RispostaComando) => void) => void;
 }

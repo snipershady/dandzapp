@@ -1,35 +1,5 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
-import { accedi, emailUnica, nuovoMaster, registra } from './aiuti.ts';
-
-// RF-90: ogni modifica arriva a tutti entro 3 secondi.
-const ENTRO_3_SECONDI = { timeout: 3_000 };
-
-/** Master con una partita e una giocatrice già dentro, ognuno nel suo browser. */
-async function preparaTavolo(browser: Browser, request: Parameters<typeof nuovoMaster>[0]) {
-  const master = await (await browser.newContext()).newPage();
-  await accedi(master, await nuovoMaster(request));
-  await master.getByRole('link', { name: 'Nuova partita' }).click();
-  await master.getByLabel('Titolo della partita').fill(`Tavolo ${emailUnica('t').slice(2, 12)}`);
-  await master.getByRole('button', { name: 'Crea la partita' }).click();
-  await expect(master.getByRole('heading', { name: 'Gestisci la partita' })).toBeVisible();
-  const gestione = master.url();
-
-  const emailIrene = emailUnica('irene');
-  await registra(request, { email: emailIrene, nome: 'Irene' });
-  await master.getByLabel('Email').fill(emailIrene);
-  await master.getByRole('button', { name: "Invia l'invito" }).click();
-  const link = await master.getByLabel("Link d'invito").inputValue();
-
-  const irene = await (await browser.newContext()).newPage();
-  await accedi(irene, emailIrene);
-  await irene.goto(link);
-  await irene.getByRole('button', { name: 'Unisciti alla partita' }).click();
-  await expect(
-    irene.getByRole('status').filter({ hasText: 'Collegato in tempo reale' }),
-  ).toBeVisible();
-
-  return { master, irene, gestione, scheda: gestione.replace(/\/gestione$/, '') };
-}
+import { expect, test, type Page } from '@playwright/test';
+import { ENTRO_3_SECONDI, preparaTavolo } from './aiuti.ts';
 
 const alTavolo = (pagina: Page) => pagina.getByRole('region', { name: 'Al tavolo' });
 
@@ -122,5 +92,7 @@ test('senza tempo reale la pagina si riallinea da sola (RF-91)', async ({ browse
   await nuovoPg.getByLabel('Nome').fill('Duronin');
   await nuovoPg.getByRole('button', { name: 'Aggiungi' }).click();
   // Il ripiego interroga l'API ogni 5 secondi.
-  await expect(irene.getByText('Duronin')).toBeVisible({ timeout: 8_000 });
+  await expect(irene.getByRole('region', { name: 'Personaggi' }).getByText('Duronin')).toBeVisible({
+    timeout: 8_000,
+  });
 });

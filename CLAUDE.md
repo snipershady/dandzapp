@@ -413,7 +413,10 @@ Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il
 
 - **Il server è l'unica autorità.** Il client invia *comandi* (`zona:scopri`, `pedina:sposta`, `mostro:aggiungi`, `dadi:tira`, `narrazione:pubblica`…); il server valida (Zod), controlla i permessi (ruolo applicativo, partecipazione, ruolo nella partita), scrive su MySQL in una transazione e diffonde un *evento*. I dadi si tirano **sul server** (RF-52, RF-63).
 - **Rooms:** `partita:{id}` per tutti i collegati di una partita, `partita:{id}:master` per il Master. Gli eventi con spoiler (mostri in zone coperte, tiri nascosti, poligoni delle zone non scoperte) vanno solo alla room del Master; quando una zona viene scoperta, i giocatori ricevono in quel momento i mostri e la sovrapposizione che contiene (RF-44).
-- **Mappa filtrata (decisione del 16/10/2026):** ai giocatori non arriva mai `mappa_giocatori.png` intera. Il server compone per ogni partita un'immagine con le sole zone scoperte (libreria `sharp`, maschera dai poligoni delle zone), la rigenera a ogni scoperta e la tiene in cache. Il Master riceve l'immagine intera. Da realizzare con lo step 6.
+- **Mappa filtrata (decisione del 16/10/2026):** ai giocatori non arriva mai `mappa_giocatori.png` intera. Il server compone per ogni partita un'immagine con le sole zone scoperte (libreria `sharp`, maschera dai poligoni delle zone), la rigenera a ogni scoperta e la tiene in cache. Il Master riceve l'immagine intera. Fatto nello step 6:
+  - `GET /api/partite/:id/mappa` (`apps/server/src/partite/mappa.ts`): fuori dalle zone scoperte il PNG è **trasparente**, e la nebbia la disegna il browser con il colore del tema (`--nebbia`);
+  - cache in `DATA_DIR/cache/mappe/<avventura>/zone-<data importazione>-<impronta delle zone>.png`, condivisa tra partite con le stesse zone scoperte; una reimportazione dell'avventura la invalida;
+  - l'istantanea porta `mappa.chiave`, che cambia con l'immagine: il client la usa nell'URL, e il server risponde con `Cache-Control: private, no-cache` ed `ETag`.
 - **Viste filtrate:** una funzione `vistaGiocatore(stato)` e una `vistaMaster(stato)` costruiscono lo stato completo per ruolo; ogni istantanea (all'ingresso, alla riconnessione, su "Aggiorna ora") passa da lì.
 - **Versione:** ogni partita ha un contatore `versione` incrementato a ogni modifica; gli eventi lo portano con sé. Se il client nota un salto, chiede l'istantanea completa. Alla riconnessione chiede sempre l'istantanea (RF-91).
 - **Trascinamento (RF-94):** la posizione si salva al rilascio; durante il drag il client ignora gli aggiornamenti di quella pedina.
@@ -427,7 +430,9 @@ Le immagini delle avventure **non** stanno in una cartella pubblica: le serve il
     - controlla l'`Origin` e autentica l'handshake con il cookie di sessione;
     - usa le stanze `utente:{id}` e `sessione:{hash}` per chiudere i collegamenti all'uscita o alla disattivazione dell'account.
   - **Rotte:** dopo ogni modifica chiamano `tempoReale.notifica(partitaId)`, che incrementa `versione` in una transazione e avvisa la stanza. Con `{ soloMaster: true }` avvisa solo il Master (es. gli inviti).
-  - **Eventi senza dati:** per ora un evento dice solo "riallineati" e il client chiede l'istantanea. Gli step successivi possono aggiungere eventi con i dati (es. lo spostamento di una pedina), da applicare solo se la versione è quella successiva attesa.
+  - **Eventi:** `modificata` dice solo "riallineati" e il client chiede l'istantanea. Gli eventi con i dati (dallo step 6: `pedina:spostata`) il client li applica solo se la versione è la successiva attesa; con un salto chiede l'istantanea.
+  - **Comandi di gioco** (dallo step 6: `pedina:sposta`, `pedine:riporta`) arrivano via Socket.IO e passano da `comando()` in `tempo-reale.ts`, che a ogni comando ricontrolla partecipazione, ruolo (gli osservatori sono in sola lettura) e partita non archiviata. Rispondono con un *ack* `{ ok } | { ok: false, errore }`.
+  - **Atomicità:** un comando con dati usa `modifica()`. La scrittura e l'incremento di `versione` avvengono nella stessa transazione, con la riga della partita bloccata (`FOR UPDATE`), così i dati di un evento sono esattamente quelli della sua versione. `notifica()` delle rotte REST resta separata dalla scrittura: va bene perché emette solo `modificata`.
   - **Client** (`apps/web/src/lib/tavolo/collegamento.svelte.ts`):
     - ricontrolla la versione ogni 15 secondi;
     - se il collegamento cade, o non parte entro 4 secondi, interroga l'API ogni 5 secondi (RF-91).
@@ -448,7 +453,7 @@ Motore InnoDB, `utf8mb4` / `utf8mb4_0900_ai_ci`, chiavi esterne attive. Nomi di 
 | `partecipazioni` | PK(`partita_id`, `utente_id`), `ruolo` ENUM(`giocatore`,`osservatore`), `personaggio_id` ("Giochi come", RF-03: preselezionato quando il Master assegna un PG), `creata_il` |
 | `inviti` | `id`, `partita_id`, `email`, `ruolo`, `personaggio_id`, `token_hash` (unico), `scade_il` (7 giorni), `accettato_il`, `accettato_da`, `creato_il`. Un nuovo invito alla stessa email sostituisce quello in sospeso |
 | `personaggi` | `id`, `partita_id`, `nome` e `sigla` (unici nella partita), `classe`, `colore`, `utente_id` (giocatore assegnato, facoltativo; `NULL` se lascia la partita o diventa osservatore), `posto` (indice in `partenze` dell'avventura), `x`, `y` |
-| `zone_scoperte` | PK(`partita_id`, `zona_id`) |
+| `zone_scoperte` | PK(`partita_id`, `zona_id`). Creata nello step 6 e popolata con le `zoneIniziali` alla creazione della partita |
 | `mostri` | `id`, `partita_id`, `nome`, `sigla`, `x`, `y` |
 | `tiri` | `id`, `partita_id`, `utente_id`, `personaggio_id`, `motivo`, `n_dadi`, `facce`, `modificatore`, `risultati` JSON, `totale`, `nascosto`, `creato_il`; indice (`partita_id`, `creato_il`) |
 
@@ -487,6 +492,7 @@ Elenco completo e primo avvio nel `README.md`. I principali:
 
 - `npm run dev`: server Fastify (porta 3000) e Vite (porta 5173, con proxy per `/api` e `/socket.io`).
 - `npm run verifica`: lint, controllo dei tipi e test. Va eseguito prima di ogni commit.
+- CI in locale con [act](https://github.com/nektos/act): `act push -j verifica -P ubuntu-latest=catthehacker/ubuntu:act-latest`. Con act il job usa la rete dell'host, quindi il MySQL della CI è pubblicato sulla porta 3307 (la 3306 è del MySQL locale). Conviene lanciarlo da una copia pulita (`git worktree add`): act copia anche i file non salvati.
 - `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_TEST_*`. In locale è un database MySQL dedicato (`dandzapp_test` su `127.0.0.1`); in alternativa c'è il servizio Docker facoltativo `docker compose --profile db-test up -d`. I test ne cancellano i dati, quindi il nome deve finire con `_test`: il codice si rifiuta di procedere altrimenti. **Mai** puntare i test al database di sviluppo o di staging.
 - `npm run utente:crea-master -- email "Nome"`: crea il primo `ROLE_MASTER` senza password, oppure promuove un utente esistente. Stampa (e invia per email) un link valido 7 giorni per scegliere la password.
 - `npm run db:migra` / `npm run db:annulla`: migrazioni Kysely in `apps/server/src/db/migrazioni/`, con nome `AAAAMMGG_HHMM_descrizione.ts`. Ogni migrazione aggiorna anche `apps/server/src/db/schema.ts`.
@@ -533,7 +539,7 @@ Ogni step è **verticale**: copre DB, server, interfaccia e test di una funzione
 | # | Step | Contenuto | Requisiti |
 | --- | --- | --- | --- |
 | 5 ✔ | **Tempo reale e presenza** | Socket.IO autenticato con il cookie di sessione. Ingresso nelle rooms `partita:{id}` e `partita:{id}:master` dopo la verifica della partecipazione. Contatore `versione`, istantanea filtrata con `vistaMaster` / `vistaGiocatore`, risincronizzazione alla riconnessione e su salto di versione. Riquadro "Al tavolo", riga di stato del collegamento con "Aggiorna ora". | RF-80, RF-81, RF-90, RF-91, RF-92, RF-93 |
-| 6 | **Mappa e pedine dei PG** | Mappa in SVG con l'immagine dell'avventura, griglia, scala grafica e nord, adattata alla larghezza dello schermo. Pedine tonde con sigla, colore e nome al passaggio del mouse; la propria è evidenziata. Trascinamento con mouse e dito, salvato al rilascio, senza "salti" (RF-94). Il Master può riportarle all'ingresso. Legenda sotto la mappa. Scelta "Giochi come". | RF-03, RF-10, RF-12, RF-30…RF-35, RF-94 |
+| 6 ✔ | **Mappa e pedine dei PG** | Mappa in SVG con l'immagine dell'avventura, griglia, scala grafica e nord, adattata alla larghezza dello schermo. Pedine tonde con sigla, colore e nome al passaggio del mouse; la propria è evidenziata. Trascinamento con mouse e dito, salvato al rilascio, senza "salti" (RF-94). Il Master può riportarle all'ingresso. Legenda sotto la mappa. Scelta "Giochi come". | RF-03, RF-10, RF-12, RF-30…RF-35, RF-94 |
 | 7 | **Nebbia di guerra** | Tabella `zone_scoperte` e pannello delle zone del Master. Copertura opaca per i giocatori e al 55% per il Master, senza intercettare i clic. All'avvio è scoperta solo la zona d'ingresso. I poligoni delle zone non scoperte non arrivano ai giocatori. Le sovrapposizioni segrete sono servite solo a zona scoperta. | RF-20…RF-25 |
 | 8 | **Mostri** | Tabella `mostri`. Il Master li aggiunge (tipo o "Altro", quantità, zona), li sposta e li toglie con conferma nell'interfaccia. I mostri ricevono sigle numerate e restano sotto la nebbia. I giocatori ricevono i dati di un mostro solo quando la sua zona è scoperta, anche alla scoperta successiva e sulle istantanee. | RF-40…RF-44 |
 | 9 | **Dadi e storico** | Tabella `tiri`. Tiro sul server con `crypto.randomInt`. Pulsanti da d4 a d100 e 3d6, numero di dadi, modificatore e motivo. Risultato in grande, con 20 naturale e 1 naturale evidenziati. Tiri nascosti visibili solo al Master. Storico degli ultimi 40 tiri. Svuotamento con conferma in due passaggi. | RF-50…RF-63 |
@@ -555,7 +561,7 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 
 > Sezione di passaggio tra una sessione di lavoro e l'altra. **All'inizio di una nuova sessione, Claude legge questa sezione, esegue i controlli di "Come ripartire" e pone all'utente le domande elencate sotto prima di scrivere codice.** Le voci risolte vanno tolte da qui e riportate nelle sezioni giuste del documento.
 
-**Ultimo aggiornamento:** 16/10/2026, fine sessione. Si riprende con lo **step 6**.
+**Ultimo aggiornamento:** 16/10/2026, fine sessione. Si riprende con lo **step 7**.
 
 ### Fatto
 
@@ -566,63 +572,46 @@ Dopo il traguardo 3, il backlog della §10 riparte dal punto 1 (caricamento di u
 | 2 | Pannello Utenti per i `ROLE_MASTER` | "completamento step 2" |
 | 3 | Generatore di mappe generico, `avventura.json`, `avventura:importa`, Sessione 0 | "step 4" |
 | 4 | Partite, PG, partecipanti, inviti, "Le mie partite", gestione | "step 4" |
-| 5 | Tempo reale (Socket.IO), presenza "Al tavolo", riga di stato, ripiego, avviso di sola lettura | **da committare** (verificare con `git status`) |
+| 5 | Tempo reale (Socket.IO), presenza "Al tavolo", riga di stato, ripiego, avviso di sola lettura | "step 5 completato" |
+| 6 | Mappa composta dal server (`sharp`), tabella `zone_scoperte`, tavolo SVG, pedine trascinabili (mouse, dito, frecce), evento `pedina:spostata`, "Giochi come", riporta all'ingresso, legenda | **da committare** (verificare con `git status`) |
 
-Ultima verifica: `npm run verifica` e `npm run test:e2e` verdi (84 test Vitest, 36 Playwright su desktop e telefono).
+Ultima verifica: `npm run verifica` verde (93 test Vitest), `npm run test:e2e` verde (40 test Playwright su desktop e telefono). La CI è stata provata in locale con act: tutti i passi verdi (§15.6).
 
-**Decisioni prese (16/10/2026)**, già riportate nel documento:
-- i PG appartengono alla partita (§6);
-- una partita usa una sola avventura (RF-05);
-- il generatore di mappe è un motore generico guidato da `dungeon.json` (§8);
-- la mappa per i giocatori la compone il server con le sole zone scoperte (§15.3);
-- il repository è pubblico e va bene così (progetto di prova);
-- "Chiedi a Claude" è fuori dall'MVP (§5.11, §10).
+**Da sapere sullo step 6:**
+- Sul telefono `touch-action` non vale dentro un SVG: in `Mappa.svelte` un ascoltatore `touchstart` non passivo blocca lo scorrimento solo per i tocchi che partono da una pedina. L'e2e usa eventi touch veri via CDP.
+- Il test e2e "un invito aperto con un altro account non si può accettare" (telefono) è fallito una volta per timeout ed è passato alla ripetizione: da tenere d'occhio.
+- Sul telefono le pedine hanno un raggio minimo di 9 px a schermo, quindi ai posti di partenza si sovrappongono un po'. Si risolve con lo zoom (backlog §10, punto 6).
+- La scala grafica e il nord sono sotto la mappa, in HTML, perché quelli disegnati nell'immagine cadono fuori dalle zone scoperte. Il Master li vede due volte.
 
 **Database:**
-- **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_1400_partite`, Sessione 0 importata, immagini in `dati/`;
+- **staging** `dandzapp` su `mithrandir` (credenziali in `.env`, `DB_*`): migrazioni fino a `20261016_1600_zone_scoperte`, Sessione 0 importata, immagini in `dati/`. Primo Master creato il 16/10/2026 con `utente:crea-master`. Con `SMTP_HOST` vuoto l'email non parte: il link per la password è stato stampato a terminale (vale 7 giorni; in alternativa si usa "Password dimenticata", che stampa il link nel log del server);
 - **test** `dandzapp_test` su `127.0.0.1` (`DB_TEST_*`): lo usano Vitest e Playwright, che ne cancellano i dati.
 
 ### Come ripartire
 
-1. `git status`: se lo step 5 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
+1. `git status`: se lo step 6 non è ancora nel repository, chiedere all'utente se committarlo prima di iniziare.
 2. `npm install` (se è cambiato `package-lock.json`), poi `npm run verifica` e `npm run test:e2e`: devono essere verdi prima di toccare codice.
 3. `npm run db:migra` per allineare lo staging, se nel frattempo sono arrivate migrazioni.
-4. Per provare a mano: `npm run dev` → http://localhost:5173 (serve un `ROLE_MASTER` sullo staging, vedi domanda 1).
+4. Per provare a mano: `npm run dev` → http://localhost:5173.
 
 ### Da chiedere all'utente all'inizio della prossima sessione
 
-1. **Primo Master sullo staging.** È stato creato con `npm run utente:crea-master -- email "Nome"`? Serve per provare a mano tavolo e gestione.
-2. **CI su GitHub.** Il workflow `.github/workflows/ci.yml` è stato eseguito dopo un push? Non è mai stato provato. Punti da guardare:
-   - l'immagine `mysql:9.7`;
-   - la CI non ha `uv`, ma per ora non serve, perché i test usano i file già generati;
-   - lo step 4 ha aggiunto l'importazione della Sessione 0 all'avvio degli e2e.
+1. **CI su GitHub.** Dopo il primo push, il workflow è verde anche su GitHub? In locale con act lo è.
 
-### Prossimo passo: step 6, il tavolo in `/partite/[id]`
+### Prossimo passo: step 7, la nebbia di guerra
 
-Obiettivo (RF-03, RF-10, RF-12, RF-30…RF-35, RF-94): al posto del riquadro "Il tavolo di gioco arriverà…" della scheda partita compaiono la mappa e le pedine dei PG.
+Obiettivo (RF-20…RF-25): il Master scopre e copre le zone, e i giocatori vedono la mappa crescere.
+
+Cosa c'è già: la tabella `zone_scoperte`, la mappa filtrata con la sua cache e `mappa.chiave` nell'istantanea. Quando cambiano le zone, cambia la chiave e il browser ricarica l'immagine.
 
 Proposta di lavoro, da confermare con l'utente all'inizio:
 
-1. **Mappa composta dal server** (§15.3).
-   - Endpoint `GET /api/partite/:id/mappa`, solo per i partecipanti. Al Master manda l'immagine intera; ai giocatori e agli osservatori un PNG con le sole zone scoperte, fuori trasparente o del colore della nebbia.
-   - Libreria `sharp`, con la maschera generata dai `percorso` delle zone in SVG. Cache in `DATA_DIR/cache/partite/<id>/<versione-nebbia>.png`, con intestazioni che impediscono le cache condivise.
-   - Finché la nebbia non esiste (step 7), le zone scoperte sono le `zoneIniziali` dell'avventura. Conviene già creare la tabella `zone_scoperte` dello step 7 e popolarla alla creazione della partita: così lo step 7 aggiunge solo il pannello.
-2. **Tavolo nel browser:**
-   - SVG con `viewBox` nelle coordinate della mappa (RF-12), immagine di sfondo, griglia (1 quadretto = `quadretto.px`), scala grafica e nord;
-   - si adatta alla larghezza dello schermo (RNF-02) e ha un testo alternativo.
-3. **Pedine dei PG** (RF-30…RF-33):
-   - tonde, con colore, sigla e nome al passaggio del mouse; bordo dorato per il proprio PG;
-   - trascinabili con mouse e dito (Pointer Events).
-   - **Permessi:** le muovono Master e giocatori, non gli osservatori; il server lo verifica.
-   - **Salvataggio:** solo al rilascio, con un comando Socket.IO `pedina:sposta` (validato con Zod: coordinate dentro la mappa).
-   - Il server risponde a tutti con l'evento `pedina:spostata` { versione, personaggioId, x, y }. È il **primo evento con i dati**: il client lo applica se la versione è quella successiva attesa, altrimenti chiede l'istantanea.
-   - **RF-94:** mentre si trascina, gli aggiornamenti di quella pedina vengono ignorati; dopo il rilascio vince la posizione salvata.
-   - L'istantanea dovrà includere le posizioni `x`, `y` dei PG, che oggi non sono in `Personaggio`.
-4. **"Giochi come"** (RF-03): selettore nella pagina, rotta `PUT /api/partite/:id/io` { personaggioId | null }, solo per i giocatori, con un PG della partita; aggiorna la presenza.
-5. **Il Master riporta tutte le pedine ai posti di partenza** (RF-34), con conferma nella pagina.
-6. **Legenda sotto la mappa** con colori e nomi (RF-35).
-7. **Test:**
-   - Vitest: permessi, isolamento, filtro della mappa (un pixel di una zona non scoperta deve risultare coperto nel PNG dei giocatori), salto di versione;
-   - Playwright: trascinamento su desktop e telefono, la posizione arriva all'altro browser entro 3 secondi.
+1. **Comando `zona:scopri` / `zona:copri`** (solo Master, via `comando()` e `modifica()`). Evento `modificata`, così i giocatori ricevono la nuova istantanea con la nuova chiave della mappa.
+2. **Pannello zone del Master** (RF-22): una casella per zona, con il nome. L'istantanea del Master deve portare le zone (id, nome, percorso, scoperta); quella dei giocatori **nessun poligono** delle zone non scoperte.
+3. **Nebbia del Master** (RF-21): sopra la mappa intera, i poligoni delle zone non scoperte al ~55% di opacità, con `pointer-events: none` (RF-25).
+4. **Sovrapposizioni segrete** (RF-24): endpoint `GET /api/partite/:id/segreti/:segretoId`, che risponde 404 se la zona del segreto non è scoperta (anche per il Master conviene servirla, per vederla in trasparenza). In alternativa vanno composte direttamente nella mappa filtrata dei giocatori: da decidere con l'utente.
+5. **Test:**
+   - Vitest: un giocatore non può scoprire zone; nell'istantanea del giocatore non ci sono poligoni coperti; il segreto risponde 404 finché la zona è coperta;
+   - Playwright: il Master scopre una zona e il giocatore la vede entro 3 secondi.
 
-Dopo lo step 6: step 7 (nebbia e segreti), 8 (mostri), 9 (dadi), 10 (narrazione e backup), poi 12–13 (rifinitura, collaudo e messa in linea).
+Dopo lo step 7: step 8 (mostri), 9 (dadi), 10 (narrazione e backup), poi 12–13 (rifinitura, collaudo e messa in linea).

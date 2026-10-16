@@ -8,6 +8,7 @@ import type {
   EventiDalServer,
   EventoPartita,
   PresenteAlTavolo,
+  RispostaComando,
   RispostaEntra,
 } from '@dandzapp/shared';
 import { io as ioClient, type Socket } from 'socket.io-client';
@@ -28,8 +29,9 @@ let partitaId: number;
 const aperti: Client[] = [];
 
 beforeEach(async () => {
-  ctx = await creaContesto();
   temporanea = await mkdtemp(path.join(tmpdir(), 'dandzapp-tr-'));
+  // Le immagini dell'avventura (e le mappe composte) stanno nella cartella temporanea.
+  ctx = await creaContesto({ cartellaDati: temporanea });
   await importaAvventura(ctx.db, { cartella: SESSIONE_0, cartellaDati: temporanea });
   await ctx.app.listen({ host: '127.0.0.1', port: 0 });
   indirizzo = `http://127.0.0.1:${(ctx.app.server.address() as AddressInfo).port}`;
@@ -297,5 +299,106 @@ describe('uscite forzate', () => {
     const chiuso = new Promise<void>((ok) => si.once('disconnect', () => ok()));
     await chiama(master, 'PATCH', `/api/amministrazione/utenti/${irene.id}`, { attivo: false });
     await chiuso;
+  });
+});
+
+describe('pedine dei PG (RF-31, RF-34)', () => {
+  const sposta = (s: Client, comando: { personaggioId: number; x: number; y: number }) =>
+    new Promise<RispostaComando>((ok) => s.emit('pedina:sposta', comando, ok));
+  const riporta = (s: Client) => new Promise<RispostaComando>((ok) => s.emit('pedine:riporta', ok));
+  const posizioni = async () =>
+    (await ctx.db.selectFrom('personaggi').select(['id', 'x', 'y']).orderBy('id').execute()).map(
+      (p) => [p.x, p.y],
+    );
+  async function nuovoPg(nome: string, sigla: string, partita = partitaId): Promise<number> {
+    const r = await chiama(master, 'POST', `/api/partite/${partita}/personaggi`, { nome, sigla });
+    return r.json().id as number;
+  }
+
+  it('un giocatore sposta una pedina e tutti ricevono la posizione, con la versione successiva', async () => {
+    const pg = await nuovoPg('Shania', 'Sh');
+    const irene = await giocatore('irene@esempio.it');
+    const [sm, si] = [collega(master), collega(irene.token)];
+    const rm_ = await entra(sm);
+    await entra(si);
+    if (!rm_.ok) throw new Error('ingresso fallito');
+
+    const evento = prossimo(sm, 'partita:evento');
+    expect(await sposta(si, { personaggioId: pg, x: 600, y: 500 })).toEqual({ ok: true });
+    const [e] = await evento;
+    expect(e).toEqual({
+      tipo: 'pedina:spostata',
+      versione: rm_.istantanea.versione + 1,
+      personaggioId: pg,
+      x: 600,
+      y: 500,
+    });
+    expect(await posizioni()).toEqual([[600, 500]]);
+  });
+
+  it('rifiuta osservatori, coordinate fuori mappa, PG di altre partite e partite archiviate', async () => {
+    const pg = await nuovoPg('Shania', 'Sh');
+    const altra = (
+      await chiama(master, 'POST', '/api/partite', { titolo: 'Altra', avventura: 'sessione-0' })
+    ).json().id as number;
+    const pgAltra = await nuovoPg('Duronin', 'Du', altra);
+    const irene = await giocatore('irene@esempio.it');
+    const luca = await giocatore('luca@esempio.it', 'osservatore');
+    const [si, sl] = [collega(irene.token), collega(luca.token)];
+    await entra(si);
+    await entra(sl);
+    const prima = await posizioni();
+
+    expect(await sposta(sl, { personaggioId: pg, x: 10, y: 10 })).toEqual({
+      ok: false,
+      errore: 'Partecipi in sola lettura',
+    });
+    expect(await sposta(si, { personaggioId: pg, x: 5000, y: 10 })).toEqual({
+      ok: false,
+      errore: 'La pedina deve restare sulla mappa',
+    });
+    expect(await sposta(si, { personaggioId: pg, x: -1, y: 10 })).toEqual({
+      ok: false,
+      errore: 'Comando non valido',
+    });
+    expect(await sposta(si, { personaggioId: pgAltra, x: 10, y: 10 })).toEqual({
+      ok: false,
+      errore: 'Personaggio non trovato',
+    });
+    await chiama(master, 'PATCH', `/api/partite/${partitaId}`, { stato: 'archiviata' });
+    expect(await sposta(si, { personaggioId: pg, x: 10, y: 10 })).toMatchObject({ ok: false });
+    expect(await posizioni()).toEqual(prima);
+  });
+
+  it('chi non è entrato nella partita non sposta nulla', async () => {
+    const pg = await nuovoPg('Shania', 'Sh');
+    const estraneo = await registra(ctx.app, { email: 'estraneo@esempio.it' });
+    const s = collega(estraneo);
+    await connesso(s);
+    await entra(s);
+    expect(await sposta(s, { personaggioId: pg, x: 10, y: 10 })).toEqual({
+      ok: false,
+      errore: 'Non sei in una partita',
+    });
+  });
+
+  it('solo il Master riporta le pedine ai posti di partenza', async () => {
+    const [sh, du] = [await nuovoPg('Shania', 'Sh'), await nuovoPg('Duronin', 'Du')];
+    const partenza = await posizioni();
+    const irene = await giocatore('irene@esempio.it');
+    const [sm, si] = [collega(master), collega(irene.token)];
+    await entra(sm);
+    await entra(si);
+    await sposta(si, { personaggioId: sh, x: 100, y: 100 });
+    await sposta(si, { personaggioId: du, x: 200, y: 200 });
+
+    expect(await riporta(si)).toEqual({
+      ok: false,
+      errore: 'Solo il Master della partita può farlo',
+    });
+    const evento = prossimo(si, 'partita:evento');
+    expect(await riporta(sm)).toEqual({ ok: true });
+    expect((await evento)[0].tipo).toBe('modificata');
+    expect(await posizioni()).toEqual(partenza);
   });
 });

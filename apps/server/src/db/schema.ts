@@ -19,6 +19,7 @@ export type Database = {
   personaggi: TabellaPersonaggi;
   partecipazioni: TabellaPartecipazioni;
   inviti: TabellaInviti;
+  zone_scoperte: TabellaZoneScoperte;
 };
 
 /** Colonna con valore predefinito: facoltativa in inserimento. */
@@ -116,3 +117,9 @@ export type TabellaInviti = {
   creato_il: ConDefault<Date>;
 };
 export type RigaInvito = Selectable<TabellaInviti>;
+
+/** Zone scoperte di una partita (nebbia di guerra): ciò che i giocatori possono vedere. */
+export type TabellaZoneScoperte = {
+  partita_id: number;
+  zona_id: string;
+};

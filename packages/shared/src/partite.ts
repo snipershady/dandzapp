@@ -109,6 +109,9 @@ export const Personaggio = z.object({
   sigla: z.string(),
   colore: z.string(),
   utenteId: id.nullable(),
+  /** Posizione della pedina in coordinate della mappa (RF-12). */
+  x: z.number(),
+  y: z.number(),
 });
 export type Personaggio = z.infer<typeof Personaggio>;
 
@@ -118,8 +121,14 @@ export const Partecipante = z.object({
   utenteId: id,
   nome: z.string(),
   ruolo: RuoloPartecipante,
+  /** "Giochi come" (RF-03). */
+  personaggioId: id.nullable(),
 });
 export type Partecipante = z.infer<typeof Partecipante>;
+
+/** "Giochi come" (RF-03): il PG scelto dal giocatore, o nessuno. */
+export const CorpoGiochiCome = z.object({ personaggioId: id.nullable() }).strict();
+export type CorpoGiochiCome = z.infer<typeof CorpoGiochiCome>;
 
 export const CorpoModificaPartecipante = z.object({ ruolo: RuoloPartecipante }).strict();
 export type CorpoModificaPartecipante = z.infer<typeof CorpoModificaPartecipante>;
@@ -166,10 +175,24 @@ export type InfoInvito = z.infer<typeof InfoInvito>;
 
 // ---------------------------------------------------------------- dettaglio
 
+/**
+ * Mappa del tavolo (RF-10). L'immagine si scarica da `/api/partite/:id/mappa`: al Master
+ * arriva intera, agli altri con le sole zone scoperte. `chiave` cambia quando cambia
+ * l'immagine, così il browser sa quando ricaricarla.
+ */
+export const MappaPartita = z.object({
+  larghezza: z.number().int().positive(),
+  altezza: z.number().int().positive(),
+  quadretto: z.object({ px: z.number().positive(), metri: z.number(), piedi: z.number() }),
+  chiave: z.string(),
+});
+export type MappaPartita = z.infer<typeof MappaPartita>;
+
 export const DettaglioPartita = z.object({
   partita: RiepilogoPartita,
   /** Versione dello stato di gioco: cresce a ogni modifica (§15.3). */
   versione: z.number().int(),
+  mappa: MappaPartita,
   personaggi: z.array(Personaggio),
   partecipanti: z.array(Partecipante),
   /** Solo per il Master della partita. */

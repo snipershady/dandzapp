@@ -6,11 +6,49 @@ export async function elencaPartecipanti(db: Db, partitaId: number): Promise<Par
   const righe = await db
     .selectFrom('partecipazioni')
     .innerJoin('utenti', 'utenti.id', 'partecipazioni.utente_id')
-    .select(['utenti.id', 'utenti.nome', 'partecipazioni.ruolo'])
+    .select(['utenti.id', 'utenti.nome', 'partecipazioni.ruolo', 'partecipazioni.personaggio_id'])
     .where('partecipazioni.partita_id', '=', partitaId)
     .orderBy('utenti.nome')
     .execute();
-  return righe.map((r) => ({ utenteId: r.id, nome: r.nome, ruolo: r.ruolo }));
+  return righe.map((r) => ({
+    utenteId: r.id,
+    nome: r.nome,
+    ruolo: r.ruolo,
+    personaggioId: r.personaggio_id,
+  }));
+}
+
+/**
+ * "Giochi come" (RF-03): il giocatore sceglie uno dei PG della partita, o nessuno.
+ * Il Master non sceglie (è sempre "Master") e un osservatore non gioca.
+ */
+export async function scegliPersonaggio(
+  db: Db,
+  partitaId: number,
+  utenteId: number,
+  personaggioId: number | null,
+): Promise<void> {
+  const { ruolo } = await trovaPartecipazione(db, partitaId, utenteId);
+  if (ruolo !== 'giocatore') throw new ErroreHttp(403, 'Solo chi gioca sceglie un personaggio');
+  if (personaggioId !== null) {
+    const pg = await db
+      .selectFrom('personaggi')
+      .select('id')
+      .where('id', '=', personaggioId)
+      .where('partita_id', '=', partitaId)
+      .executeTakeFirst();
+    if (!pg) {
+      throw new ErroreHttp(400, 'Controlla i dati inseriti', {
+        personaggioId: 'Personaggio inesistente',
+      });
+    }
+  }
+  await db
+    .updateTable('partecipazioni')
+    .set({ personaggio_id: personaggioId })
+    .where('partita_id', '=', partitaId)
+    .where('utente_id', '=', utenteId)
+    .execute();
 }
 
 /** Un osservatore non controlla PG: passando a osservatore li perde (§4.2). */
