@@ -177,6 +177,37 @@ curl -s http://127.0.0.1:3000/api/salute          # {"stato":"ok",...}
 
 Il servizio gira come utente `tavolo`, ascolta solo su `127.0.0.1:3000` e può scrivere solo in `/var/lib/tavolo`. Per i log: `journalctl -u tavolo -f`.
 
+### Cos'è e perché si avvia al boot
+
+Il servizio `tavolo` **è l'applicazione**: avvia il server Node (Fastify + Socket.IO), che risponde all'API (`/api/...`) e al tempo reale (`/socket.io/`), tira i dadi, controlla i permessi, filtra gli spoiler e compone la mappa dei giocatori. Apache2 e nginx fanno solo da proxy inverso verso `127.0.0.1:3000`: se il servizio è fermo, il sito risponde 502.
+
+In sviluppo lo stesso server si avvia con `npm run dev`. In produzione se ne occupa systemd, che in più:
+
+- lo fa girare con un utente di sistema senza privilegi (`tavolo`);
+- lo riavvia se si ferma per un errore (`Restart=on-failure`);
+- ne raccoglie i log (`journalctl`);
+- lo chiude in modo ordinato (SIGTERM: chiude i collegamenti e il database).
+
+Si avvia al boot (`enable`) perché è un server sempre acceso, come MySQL e Apache2: dopo un riavvio della macchina il tavolo torna in linea da solo. Parte dopo MySQL (`After=mysql.service`).
+
+### Perché scrive in `/var/lib/tavolo`
+
+`/var/lib/tavolo` è la cartella dei dati (`DATA_DIR` in `tavolo.env`). Lì **non ci sono dati di gioco**: utenti, partite, nebbia, pedine, mostri, tiri e narrazione stanno solo in MySQL, che resta l'unica fonte di verità. Nella cartella ci sono solo immagini:
+
+| Contenuto                                                                           | Percorso                   | Perché non sta in MySQL                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Immagini delle avventure importate (`mappa_giocatori.png`, ritagli `segreti/*.png`) | `avventure/<slug>/`        | Le scrive `avventura:importa`. Sono file binari di qualche MB, solo letti: in MySQL appesantirebbero il database e i backup senza vantaggi. La tabella `avventure` contiene la definizione e fa riferimento a questi file.                                             |
+| Cache delle mappe composte                                                          | `cache/mappe/<avventura>/` | Per i giocatori il server compone con `sharp` un'immagine con le sole zone scoperte. Rifarla a ogni richiesta sarebbe costoso, quindi la salva qui e la riusa tra le partite con le stesse zone scoperte. Si può cancellare in qualunque momento: si rigenera da sola. |
+
+Durante il gioco il servizio scrive solo la cache; le immagini delle avventure le scrive il comando di importazione.
+
+La cartella sta fuori dal codice (`/opt/tavolo`) e fuori dalla cartella pubblica del web server per due motivi:
+
+- **Sicurezza:** con `ProtectSystem=strict` tutto il filesystem è in sola lettura per il servizio, e `ReadWritePaths=/var/lib/tavolo` apre solo questa cartella. Anche sfruttando un difetto del server, non si potrebbe modificare il codice o il sistema.
+- **Niente spoiler:** Apache2 e nginx non possono servire queste immagini come file statici. Passano sempre da Node, che verifica la partecipazione alla partita e le zone scoperte.
+
+Per questo il backup (§9) ha due parti: il dump di MySQL per lo stato e una copia di `/var/lib/tavolo` per le immagini. Le immagini si possono anche ricreare reimportando le avventure dalla cartella `avventure/` del repository; la cache non serve salvarla.
+
 ## 8A. Produzione: Apache2 e certificato
 
 ```bash
