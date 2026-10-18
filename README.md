@@ -26,7 +26,7 @@ npm run dev                          # http://localhost:5173
 
 | Comando                                       | Cosa fa                                                                                        |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `npm run dev`                                 | Server Fastify (porta 3000, riavvio automatico) e Vite (porta 5173, con proxy verso il server) |
+| `npm run dev`                                 | Server Fastify (porta 3010, riavvio automatico) e Vite (porta 5173, con proxy verso il server) |
 | `npm run build`                               | Build della SPA in `apps/web/build`                                                            |
 | `npm start`                                   | Avvia il server di produzione, che serve anche la build della SPA                              |
 | `npm run db:migra`                            | Applica le migrazioni mancanti                                                                 |

@@ -473,7 +473,7 @@ Il server di produzione è **Debian 13 (trixie)** con **Apache2 oppure nginx**: 
 Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbot)
                         │  proxy inverso (HTTP + upgrade WebSocket)
                         ▼
-                   Node 24 (systemd, ascolta solo su 127.0.0.1:3000)
+                   Node 24 (systemd, ascolta solo su 127.0.0.1:3010)
                         │
                         ▼
                    MySQL 9.7 (solo locale)
@@ -482,7 +482,7 @@ Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbo
 - **Ruolo del web server:** TLS, compressione, redirect da HTTP a HTTPS, intestazioni di sicurezza (HSTS, `X-Content-Type-Options`, CSP) e proxy verso Node. La CSP può essere stretta, perché l'app non carica nulla da siti esterni (caratteri compresi): `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'` (gli stili in linea servono a Svelte). Lo script di avvio che SvelteKit mette in linea nell'HTML va autorizzato con il suo hash (opzione `csp` di SvelteKit, oppure l'hash calcolato dalla build), non con `'unsafe-inline'`. Da fare e verificare allo step 13. Non contiene logica dell'applicazione e non fa controlli di permesso.
 - **WebSocket:** Socket.IO risponde sul percorso `/socket.io/`, e il proxy deve inoltrare l'upgrade.
   - **nginx:** `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade` e `proxy_set_header Connection "upgrade"`. Serve anche un `proxy_read_timeout` lungo (es. `3600s`), altrimenti nginx chiude i collegamenti inattivi.
-  - **Apache2:** moduli `proxy`, `proxy_http`, `proxy_wstunnel`, `headers`, `ssl`, `rewrite`, con `ProxyPass / http://127.0.0.1:3000/ upgrade=websocket` (Apache ≥ 2.4.47, quindi va bene la versione di Debian 13) e `ProxyPreserveHost On`.
+  - **Apache2:** moduli `proxy`, `proxy_http`, `proxy_wstunnel`, `headers`, `ssl`, `rewrite`, con `ProxyPass / http://127.0.0.1:3010/ upgrade=websocket` (Apache ≥ 2.4.47, quindi va bene la versione di Debian 13) e `ProxyPreserveHost On`.
 - **Intestazioni inoltrate:** il proxy passa `X-Forwarded-For` e `X-Forwarded-Proto`. Fastify usa `trustProxy` limitato a `127.0.0.1`, così riconosce l'IP reale (per il limite ai tentativi di accesso) e l'HTTPS (cookie `Secure`).
 - **File statici:** la build della SPA (`apps/web/build`) può essere servita direttamente da Apache2/nginx per alleggerire Node. Le immagini delle avventure e le sovrapposizioni segrete **no**: passano sempre da Node, che verifica partecipazione e zona scoperta. Stanno fuori dalla `DocumentRoot` / `root`.
 - **Un solo processo Node:** non servono sessioni "appiccicose" (*sticky*) né bilanciamento. Se in futuro si passasse a più processi, andrebbero aggiunti entrambi, insieme all'adapter Redis di Socket.IO.
@@ -497,7 +497,7 @@ Browser ──HTTPS──▶ Apache2 / nginx (:443, TLS Let's Encrypt via certbo
 
 Elenco completo e primo avvio nel `README.md`. I principali:
 
-- `npm run dev`: server Fastify (porta 3000) e Vite (porta 5173, con proxy per `/api` e `/socket.io`).
+- `npm run dev`: server Fastify (porta 3010) e Vite (porta 5173, con proxy per `/api` e `/socket.io`).
 - `npm run verifica`: lint, controllo dei tipi e test. Va eseguito prima di ogni commit.
 - CI in locale con [act](https://github.com/nektos/act): `act push -j verifica -P ubuntu-latest=catthehacker/ubuntu:act-latest`. Con act il job usa la rete dell'host, quindi il MySQL della CI è pubblicato sulla porta 3307 (la 3306 è del MySQL locale). Conviene lanciarlo da una copia pulita (`git worktree add`): act copia anche i file non salvati.
 - `npm test` / `npm run test:e2e`: Vitest e Playwright, sempre sul database `DB_TEST_*`. In locale è un database MySQL dedicato (`dandzapp_test` su `127.0.0.1`); in alternativa c'è il servizio Docker facoltativo `docker compose --profile db-test up -d`. I test ne cancellano i dati, quindi il nome deve finire con `_test`: il codice si rifiuta di procedere altrimenti. **Mai** puntare i test al database di sviluppo o di staging.

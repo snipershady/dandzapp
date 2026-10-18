@@ -11,7 +11,7 @@ L'architettura è quella della §15.5 di `CLAUDE.md`:
 Browser ──HTTPS──▶ Apache2 / nginx (:443, certificato Let's Encrypt)
                         │  proxy (HTTP + WebSocket)
                         ▼
-                   Node 24 (systemd, solo 127.0.0.1:3000)
+                   Node 24 (systemd, solo 127.0.0.1:3010)
                         │
                         ▼
                    MySQL 9.7 (solo locale)
@@ -172,14 +172,14 @@ sudo cp /opt/tavolo/deploy/systemd/tavolo.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now tavolo
 systemctl status tavolo
-curl -s http://127.0.0.1:3000/api/salute          # {"stato":"ok",...}
+curl -s http://127.0.0.1:3010/api/salute          # {"stato":"ok",...}
 ```
 
-Il servizio gira come utente `tavolo`, ascolta solo su `127.0.0.1:3000` e può scrivere solo in `/var/lib/tavolo`. Per i log: `journalctl -u tavolo -f`.
+Il servizio gira come utente `tavolo`, ascolta solo su `127.0.0.1:3010` e può scrivere solo in `/var/lib/tavolo`. Per i log: `journalctl -u tavolo -f`.
 
 ### Cos'è e perché si avvia al boot
 
-Il servizio `tavolo` **è l'applicazione**: avvia il server Node (Fastify + Socket.IO), che risponde all'API (`/api/...`) e al tempo reale (`/socket.io/`), tira i dadi, controlla i permessi, filtra gli spoiler e compone la mappa dei giocatori. Apache2 e nginx fanno solo da proxy inverso verso `127.0.0.1:3000`: se il servizio è fermo, il sito risponde 502.
+Il servizio `tavolo` **è l'applicazione**: avvia il server Node (Fastify + Socket.IO), che risponde all'API (`/api/...`) e al tempo reale (`/socket.io/`), tira i dadi, controlla i permessi, filtra gli spoiler e compone la mappa dei giocatori. Apache2 e nginx fanno solo da proxy inverso verso `127.0.0.1:3010`: se il servizio è fermo, il sito risponde 502.
 
 In sviluppo lo stesso server si avvia con `npm run dev`. In produzione se ne occupa systemd, che in più:
 
