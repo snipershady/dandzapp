@@ -341,3 +341,63 @@ sudo /opt/tavolo/deploy/comando.sh avventura:importa -- avventure/ID
 | Il cookie di sessione non resta                             | `APP_URL` deve cominciare con `https://`: solo così il cookie è `Secure`.                                                             |
 | `apache2ctl configtest` fallisce sui certificati            | Il certificato non c'è ancora: prima il passo 1 del punto 8A.                                                                         |
 | Il backup fallisce con "Access denied"                      | Controlla `/etc/tavolo/backup.my.cnf` e che l'utente abbia i privilegi sullo schema `tavolo`.                                         |
+| Apache risponde 503 Service Unavailable                     | Il servizio Node non è in ascolto: `systemctl status tavolo` e `journalctl -u tavolo -n 50`. Controlla anche la porta nel proxy.      |
+| `status=217/USER` in `systemctl status tavolo`              | L'utente di `User=` non esiste: crealo (punto 1) o indica quello giusto (punto 13).                                                   |
+| `status=200/CHDIR` in `systemctl status tavolo`             | `WorkingDirectory` non esiste o non è leggibile; con il codice in `/home` serve `ProtectHome=read-only` (punto 13).                   |
+
+## 13. Altro utente o altra cartella
+
+La guida installa il codice in `/opt/tavolo` e lo fa girare con l'utente di sistema `tavolo`. Si può usare anche un utente e una cartella diversi, ad esempio l'utente `dandzapp` con il codice in `/home/dandzapp/public_html`. Cambiano solo i punti qui sotto: il resto della guida vale com'è.
+
+Gli esempi usano questi valori, da adattare:
+
+```bash
+UTENTE=dandzapp
+CARTELLA=/home/dandzapp/public_html
+```
+
+**Codice (punto 4).** Il clone va fatto con l'utente scelto, altrimenti `git pull` fallisce:
+
+```bash
+sudo -u dandzapp git clone https://github.com/snipershady/dandzapp.git /home/dandzapp/public_html
+# se è già stato clonato da root:
+sudo chown -R dandzapp:dandzapp /home/dandzapp/public_html
+```
+
+**Permessi (punti 1 e 5).** Parametri leggibili dall'utente ma non modificabili, cartella dei dati sua:
+
+```bash
+sudo install -d -o root -g dandzapp -m 750 /etc/tavolo
+sudo chown root:dandzapp /etc/tavolo/tavolo.env
+sudo chmod 640 /etc/tavolo/tavolo.env
+sudo install -d -o dandzapp -g dandzapp -m 750 /var/lib/tavolo
+```
+
+**Servizio (punto 7).** Dopo aver copiato `deploy/systemd/tavolo.service` in `/etc/systemd/system/`, si cambiano quattro righe:
+
+```ini
+User=dandzapp
+Group=dandzapp
+WorkingDirectory=/home/dandzapp/public_html
+# Il codice sta in /home: il servizio lo legge ma non lo modifica.
+ProtectHome=read-only
+```
+
+Con `ProtectHome=true` (il valore del modello) il servizio non vede `/home` e si ferma con `status=200/CHDIR`. La porta non va nel file del servizio: la legge l'applicazione da `PORT` in `/etc/tavolo/tavolo.env`.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart tavolo
+curl -s http://127.0.0.1:3010/api/salute
+```
+
+**Script (punti 6, 9 e 10).** `comando.sh` e `aggiorna.sh` leggono utente e cartella da `TAVOLO_UTENTE` e `TAVOLO_CARTELLA`:
+
+```bash
+sudo TAVOLO_UTENTE=dandzapp TAVOLO_CARTELLA=/home/dandzapp/public_html deploy/comando.sh db:migra
+sudo TAVOLO_UTENTE=dandzapp TAVOLO_CARTELLA=/home/dandzapp/public_html deploy/aggiorna.sh
+```
+
+Nel backup, `ExecStart` di `tavolo-backup.service` va portato a `/home/dandzapp/public_html/deploy/backup.sh`. Nel ripristino, la cartella dei dati torna all'utente scelto: `sudo chown -R dandzapp:dandzapp /var/lib/tavolo`.
+
+**Cosa si perde.** Con l'utente `tavolo` il servizio non può modificare il proprio codice. Con un utente che possiede il codice, e magari ha anche un login, l'isolamento è minore: `ProtectHome=read-only` e `ProtectSystem=strict` lo limitano mentre il servizio gira, ma non quando si entra con quell'utente.
