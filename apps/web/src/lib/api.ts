@@ -37,7 +37,13 @@ export async function api<S extends z.ZodType | undefined = undefined>(
   }
 
   const testo = await risposta.text();
-  const dati: unknown = testo ? JSON.parse(testo) : undefined;
+  let dati: unknown;
+  try {
+    dati = testo ? JSON.parse(testo) : undefined;
+  } catch {
+    // Risposta non JSON (es. pagina d'errore di un proxy): vale solo se non era un successo.
+    if (risposta.ok) throw new ErroreApi(risposta.status, 'Risposta imprevista del server');
+  }
   if (!risposta.ok) {
     const errore = RispostaErrore.safeParse(dati);
     throw errore.success

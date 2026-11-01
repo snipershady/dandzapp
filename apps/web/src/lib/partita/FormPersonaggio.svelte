@@ -51,6 +51,16 @@
     }
   }
 
+  const TAVOLOZZA = [
+    '#a8322a',
+    '#8a5a1c',
+    '#4f6b2a',
+    '#2c6a8f',
+    '#6b3f86',
+    '#1f4f8f',
+    '#a05a2c',
+    '#3d6b5a',
+  ];
   const CLASSI = ['Guerriero', 'Chierico', 'Mago', 'Ladro', 'Nano', 'Elfo', 'Halfling'];
   const idClassi = $props.id();
 </script>
@@ -84,13 +94,25 @@
       oninput={() => (siglaToccata = true)}
       errore={modulo.campi['sigla']}
     />
-    <Campo
-      etichetta="Colore"
-      name="colore"
-      type="color"
-      bind:value={colore}
-      errore={modulo.campi['colore']}
-    />
+    <fieldset class="colore">
+      <legend>Colore</legend>
+      <div class="tavolozza">
+        {#each TAVOLOZZA as c (c)}
+          <label class="campione" style:background={c}>
+            <input type="radio" name="colore-{idClassi}" value={c} bind:group={colore} />
+            <span class="visually-hidden">{c}</span>
+          </label>
+        {/each}
+        <input
+          class="libero"
+          type="color"
+          name="colore"
+          aria-label="Colore personalizzato"
+          bind:value={colore}
+        />
+      </div>
+      {#if modulo.campi['colore']}<p class="errore">{modulo.campi['colore']}</p>{/if}
+    </fieldset>
     <Selettore etichetta="Giocatore" bind:value={utenteId} errore={modulo.campi['utenteId']}>
       <option value={null}>Nessuno</option>
       {#each giocatori as g (g.utenteId)}
@@ -123,8 +145,65 @@
     color: var(--su-accento);
     font-weight: 700;
   }
-  :global(.form-pg input[type='color']) {
-    padding: 0.15rem;
-    height: 2.6rem;
+  .colore {
+    border: 0;
+    padding: 0;
+    margin: 0 0 1rem;
+    min-width: 0;
+  }
+  legend {
+    font-weight: 600;
+    padding: 0;
+    margin-bottom: 0.3rem;
+  }
+  .tavolozza {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+  }
+  .campione {
+    position: relative;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    border: 2px solid rgb(0 0 0 / 0.35);
+    cursor: pointer;
+  }
+  .campione input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .campione:has(input:checked) {
+    outline: 3px solid var(--testo);
+    outline-offset: 2px;
+  }
+  .campione:has(input:focus-visible) {
+    outline: 3px solid var(--accento);
+    outline-offset: 2px;
+  }
+  .libero {
+    width: 2.4rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--bordo);
+    border-radius: 0.4rem;
+    background: none;
+    cursor: pointer;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .errore {
+    margin: 0.3rem 0 0;
+    font-size: 0.9rem;
+    color: var(--errore);
   }
 </style>

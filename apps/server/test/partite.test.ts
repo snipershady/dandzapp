@@ -469,6 +469,102 @@ describe('gestione della partita', () => {
   });
 });
 
+describe('eliminazione da parte di un altro Master', () => {
+  it('qualsiasi ROLE_MASTER elimina una partita altrui, un giocatore no', async () => {
+    const id = await nuovaPartita();
+    const giocatore = await registra(ctx.app, { email: 'gio@esempio.it', nome: 'Gio' });
+    const altro = await registra(ctx.app, { email: 'altro@esempio.it', nome: 'Altro' });
+    await creaOPromuoviMaster(ctx.db, { email: 'altro@esempio.it', nome: '' });
+
+    expect((await chiama(giocatore, 'GET', '/api/amministrazione/partite')).statusCode).toBe(403);
+    expect(
+      (await chiama(giocatore, 'DELETE', `/api/amministrazione/partite/${id}`)).statusCode,
+    ).toBe(403);
+    const elenco = await chiama(altro, 'GET', '/api/amministrazione/partite');
+    expect(elenco.json().partite).toHaveLength(1);
+    expect((await chiama(altro, 'DELETE', `/api/amministrazione/partite/${id}`)).statusCode).toBe(
+      204,
+    );
+    expect((await chiama(altro, 'DELETE', `/api/amministrazione/partite/${id}`)).statusCode).toBe(
+      404,
+    );
+    expect(await ctx.db.selectFrom('partite').selectAll().execute()).toEqual([]);
+  });
+});
+
+describe('eliminazione definitiva', () => {
+  it('cancella ogni dato di gioco della partita e lascia intatte le altre', async () => {
+    const id = await nuovaPartita();
+    const altra = await nuovaPartita(master, 'Un’altra');
+    const irene = await unisci(id, 'irene@esempio.it');
+    await chiama(master, 'POST', `/api/partite/${id}/personaggi`, {
+      nome: 'Shania',
+      sigla: 'Sh',
+      utenteId: irene.utenteId,
+    });
+    await chiama(master, 'POST', `/api/partite/${id}/inviti`, { email: 'fabio@esempio.it' });
+    const pg = (await dettaglio(master, id)).personaggi[0]!;
+    await ctx.db
+      .insertInto('mostri')
+      .values({ partita_id: id, nome: 'Ragno', sigla: 'Ra1', x: 1, y: 1 })
+      .execute();
+    await ctx.db
+      .insertInto('mostri_sigle')
+      .values({ partita_id: id, prefisso: 'Ra', ultimo: 1 })
+      .execute();
+    await ctx.db
+      .insertInto('tiri')
+      .values({
+        partita_id: id,
+        utente_id: irene.utenteId,
+        personaggio_id: pg.id,
+        personaggio_nome: 'Shania',
+        n_dadi: 1,
+        facce: 20,
+        modificatore: 0,
+        risultati: '[7]',
+        totale: 7,
+      })
+      .execute();
+    const nar = await ctx.db
+      .insertInto('narrazioni')
+      .values({ partita_id: id, testo: 'Testo' })
+      .executeTakeFirstOrThrow();
+    await ctx.db
+      .updateTable('partite')
+      .set({ narrazione_id: Number(nar.insertId) })
+      .where('id', '=', id)
+      .execute();
+
+    const r = await chiama(master, 'DELETE', `/api/partite/${id}`);
+    expect(r.statusCode, r.body).toBe(204);
+
+    for (const tabella of [
+      'personaggi',
+      'partecipazioni',
+      'inviti',
+      'zone_scoperte',
+      'mostri',
+      'mostri_sigle',
+      'tiri',
+      'narrazioni',
+    ] as const) {
+      const righe = await ctx.db
+        .selectFrom(tabella)
+        .selectAll()
+        .where('partita_id', '=', id)
+        .execute();
+      expect(righe, tabella).toEqual([]);
+    }
+    expect((await chiama(master, 'GET', `/api/partite/${id}`)).statusCode).toBe(404);
+    // L'altra partita e gli utenti restano.
+    expect((await dettaglio(master, altra)).partita.titolo).toBe('Un’altra');
+    expect(
+      await ctx.db.selectFrom('utenti').select('id').where('id', '=', irene.utenteId).execute(),
+    ).toHaveLength(1);
+  });
+});
+
 describe('mappa del tavolo (RF-10, §15.3)', () => {
   /** Colore RGBA di un pixel di un PNG. */
   async function pixel(png: Buffer, x: number, y: number): Promise<number[]> {

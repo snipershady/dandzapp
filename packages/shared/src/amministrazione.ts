@@ -31,3 +31,19 @@ export type CorpoModificaUtente = z.infer<typeof CorpoModificaUtente>;
 
 export const RispostaUtenteAmministrato = z.object({ utente: UtenteAmministrato });
 export type RispostaUtenteAmministrato = z.infer<typeof RispostaUtenteAmministrato>;
+
+/** Partita come la vede il pannello di amministrazione: tutte, anche quelle a cui non si partecipa. */
+export const PartitaAmministrata = z.object({
+  id: z.number().int(),
+  titolo: z.string(),
+  stato: z.enum(['attiva', 'archiviata']),
+  masterNome: z.string(),
+  avventura: z.string(),
+  numeroPartecipanti: z.number().int(),
+});
+export type PartitaAmministrata = z.infer<typeof PartitaAmministrata>;
+
+export const RispostaElencoPartiteAmministrate = z.object({
+  partite: z.array(PartitaAmministrata),
+});
+export type RispostaElencoPartiteAmministrate = z.infer<typeof RispostaElencoPartiteAmministrate>;

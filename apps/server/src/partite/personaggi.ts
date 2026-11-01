@@ -112,8 +112,7 @@ export async function creaPersonaggio(
       .selectAll()
       .where('id', '=', Number(insertId))
       .executeTakeFirstOrThrow();
-    if (dati.utenteId !== null)
-      await preselezionaPersonaggio(db, partitaId, dati.utenteId, riga.id);
+    await assegnaPersonaggio(db, partitaId, riga.id, dati.utenteId);
     return aPersonaggio(riga);
   } catch (e) {
     erroreDuplicato(e);
@@ -138,7 +137,7 @@ export async function modificaPersonaggio(
   } catch (e) {
     erroreDuplicato(e);
   }
-  if (utenteId) await preselezionaPersonaggio(db, partitaId, utenteId, personaggioId);
+  if (utenteId !== undefined) await assegnaPersonaggio(db, partitaId, personaggioId, utenteId);
   return aPersonaggio(await trovaPersonaggio(db, partitaId, personaggioId));
 }
 
@@ -164,6 +163,33 @@ async function trovaPersonaggio(
     .executeTakeFirst();
   if (!riga) throw new ErroreHttp(404, 'Personaggio non trovato');
   return riga;
+}
+
+/**
+ * Allinea il "Giochi come" (RF-03) all'assegnazione del Master: chi controllava il PG e
+ * non è più il suo giocatore lo perde; il nuovo giocatore lo ottiene.
+ */
+async function assegnaPersonaggio(
+  db: Db,
+  partitaId: number,
+  personaggioId: number,
+  utenteId: number | null,
+): Promise<void> {
+  let ex = db
+    .updateTable('partecipazioni')
+    .set({ personaggio_id: null })
+    .where('partita_id', '=', partitaId)
+    .where('personaggio_id', '=', personaggioId);
+  if (utenteId !== null) ex = ex.where('utente_id', '!=', utenteId);
+  await ex.execute();
+  if (utenteId !== null) {
+    await db
+      .updateTable('partecipazioni')
+      .set({ personaggio_id: personaggioId })
+      .where('partita_id', '=', partitaId)
+      .where('utente_id', '=', utenteId)
+      .execute();
+  }
 }
 
 /** Il PG assegnato diventa il "Giochi come" del giocatore, se non ne aveva scelto uno (RF-03). */

@@ -1,12 +1,15 @@
 <script lang="ts">
   import {
+    RispostaElencoPartiteAmministrate,
     RispostaElencoUtenti,
+    type PartitaAmministrata,
     RispostaUtenteAmministrato,
     type CorpoModificaUtente,
     type UtenteAmministrato,
   } from '@dandzapp/shared';
   import { api, ErroreApi } from '#lib/api.ts';
   import Avviso from '#lib/componenti/Avviso.svelte';
+  import PulsanteConferma from '#lib/componenti/PulsanteConferma.svelte';
   import type { PageProps } from './$types';
 
   let { data }: PageProps = $props();
@@ -42,6 +45,32 @@
       errore = e instanceof ErroreApi ? e.message : 'Impossibile caricare gli utenti';
     } finally {
       caricamento = false;
+    }
+  }
+
+  let partite = $state<PartitaAmministrata[]>([]);
+  let errorePartite = $state<string | null>(null);
+
+  async function caricaPartite(): Promise<void> {
+    try {
+      const risposta = await api('/api/amministrazione/partite', {
+        schema: RispostaElencoPartiteAmministrate,
+      });
+      partite = risposta.partite;
+      errorePartite = null;
+    } catch (e) {
+      errorePartite = e instanceof ErroreApi ? e.message : 'Impossibile caricare le partite';
+    }
+  }
+  void caricaPartite();
+
+  async function eliminaPartita(p: PartitaAmministrata): Promise<void> {
+    try {
+      await api(`/api/amministrazione/partite/${p.id}`, { metodo: 'DELETE' });
+      partite = partite.filter((x) => x.id !== p.id);
+      errorePartite = null;
+    } catch (e) {
+      errorePartite = e instanceof ErroreApi ? e.message : 'Eliminazione non riuscita';
     }
   }
 
@@ -147,6 +176,37 @@
       </li>
     {/each}
   </ul>
+
+  <h2>Partite</h2>
+  <p class="intro">Un Master può eliminare qualsiasi partita, con tutto il suo contenuto.</p>
+  {#if errorePartite}<Avviso>{errorePartite}</Avviso>{/if}
+  {#if partite.length === 0}
+    <p class="conteggio">Nessuna partita.</p>
+  {:else}
+    <ul class="elenco">
+      {#each partite as p (p.id)}
+        <li aria-label={p.titolo}>
+          <div class="identita">
+            <strong>{p.titolo}</strong>
+            <span class="email">{p.avventura} · Master {p.masterNome}</span>
+          </div>
+          <div class="stato">
+            <span class="etichetta">{p.stato === 'attiva' ? 'Attiva' : 'Archiviata'}</span>
+            <span class="data">{p.numeroPartecipanti} partecipanti</span>
+          </div>
+          <div class="azioni">
+            <PulsanteConferma
+              testo="Elimina"
+              domanda="Eliminare “{p.titolo}”?"
+              conferma="Elimina"
+              pericolosa
+              onconferma={() => eliminaPartita(p)}
+            />
+          </div>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 </main>
 
 <style>
@@ -158,6 +218,10 @@
   h1 {
     font-family: var(--font-titoli);
     margin-bottom: 0.25rem;
+  }
+  h2 {
+    font-family: var(--font-titoli);
+    margin: 2rem 0 0.25rem;
   }
   .intro,
   .conteggio {

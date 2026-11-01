@@ -1,6 +1,7 @@
 import type {
   CorpoModificaPartita,
   DettaglioPartita,
+  PartitaAmministrata,
   RiepilogoPartita,
   RispostaElencoPartite,
   RuoloInPartita,
@@ -163,6 +164,23 @@ export async function modificaPartita(
 }
 
 /** Elimina la partita con PG, partecipazioni e inviti (cancellazione a cascata). */
-export async function eliminaPartita(db: Db, partitaId: number): Promise<void> {
-  await db.deleteFrom('partite').where('id', '=', partitaId).execute();
+export async function eliminaPartita(db: Db, partitaId: number): Promise<boolean> {
+  const { numDeletedRows } = await db
+    .deleteFrom('partite')
+    .where('id', '=', partitaId)
+    .executeTakeFirstOrThrow();
+  return numDeletedRows > 0n;
+}
+
+/** Tutte le partite, per l'amministrazione. */
+export async function elencaPartiteAmministrate(db: Db): Promise<PartitaAmministrata[]> {
+  const righe = await queryRiepiloghi(db).execute();
+  return righe.map((r) => ({
+    id: r.id,
+    titolo: r.titolo,
+    stato: r.stato,
+    masterNome: r.master_nome,
+    avventura: r.avventura_titolo,
+    numeroPartecipanti: Number(r.numero_partecipanti ?? 0),
+  }));
 }
