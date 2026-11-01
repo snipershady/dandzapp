@@ -17,7 +17,7 @@ Browser ──HTTPS──▶ Apache2 / nginx (:443, certificato Let's Encrypt)
                    MySQL 9.7 (solo locale)
 ```
 
-Tutti i comandi vanno lanciati come utente con `sudo`. Le parti in `MAIUSCOLO` vanno adattate.
+Gli esempi usano `sudo`. Gli script di `deploy/` (`aggiorna.sh`, `comando.sh`, `backup.sh`, `installa-systemd.sh`) invece si lanciano **da root, senza `sudo`** (`sudo -i`), e leggono percorsi, utente, ramo e file `.env` da un'unica configurazione, `deploy.conf` (vedi il punto 13). Le parti in `MAIUSCOLO` vanno adattate.
 
 ## File in `deploy/`
 
@@ -29,6 +29,8 @@ Tutti i comandi vanno lanciati come utente con `sudo`. Le parti in `MAIUSCOLO` v
 | `apache2/dandzapp.conf`                   | Sito Apache2 per la produzione                                                                  |
 | `nginx/dandzapp-staging.conf`             | Sito nginx per lo staging                                                                       |
 | `comando.sh`                              | Lancia un comando npm (migrazioni, importazioni, email di prova…) con i parametri di produzione |
+| `deploy.conf.esempio`                     | Configurazione generale degli script: cartella, utente, `.env`, servizio, backup                |
+| `installa-systemd.sh`                     | Installa i file systemd adattandoli a `deploy.conf`                                             |
 | `aggiorna.sh`                             | Porta il server all'ultima versione                                                             |
 | `backup.sh`                               | Dump del database e copia dei dati, con rotazione                                               |
 
@@ -149,7 +151,7 @@ MAILER_DSN=smtps://UTENTE:PASSWORD@HOST:465       # TLS diretto
 Per cambiare servizio di posta: modificare la riga, poi `sudo systemctl restart tavolo`. Per provarlo:
 
 ```bash
-sudo /opt/tavolo/deploy/comando.sh email:prova -- tuo@indirizzo.it
+/opt/tavolo/deploy/comando.sh email:prova -- tuo@indirizzo.it
 ```
 
 La password non compare mai nei messaggi: viene sostituita con `***`.
@@ -158,9 +160,9 @@ La password non compare mai nei messaggi: viene sostituita con `***`.
 
 ```bash
 cd /opt/tavolo
-sudo deploy/comando.sh db:migra
-sudo deploy/comando.sh avventura:importa -- avventure/sessione-0
-sudo deploy/comando.sh utente:crea-master -- email@del.master "Nome del Master"
+deploy/comando.sh db:migra
+deploy/comando.sh avventura:importa -- avventure/sessione-0
+deploy/comando.sh utente:crea-master -- email@del.master "Nome del Master"
 ```
 
 Il terzo comando stampa (e invia per email) il link, valido 7 giorni, con cui il Master sceglie la password.
@@ -300,7 +302,7 @@ Il Master può anche esportare in JSON una singola partita, dalla sua pagina di 
 ## 10. Aggiornare
 
 ```bash
-sudo /opt/tavolo/deploy/aggiorna.sh
+/opt/tavolo/deploy/aggiorna.sh   # da root
 ```
 
 Lo script fa, nell'ordine:
@@ -311,7 +313,7 @@ Lo script fa, nell'ordine:
 4. le migrazioni;
 5. il riavvio del servizio, controllando che sia ripartito.
 
-Per aggiornare un altro ramo, ad esempio sullo staging: `sudo TAVOLO_RAMO=nome-ramo /opt/tavolo/deploy/aggiorna.sh`.
+Per aggiornare un altro ramo, ad esempio sullo staging: `TAVOLO_RAMO=nome-ramo /opt/tavolo/deploy/aggiorna.sh` (da root, oppure `TAVOLO_RAMO` in `deploy.conf`).
 
 Se un'avventura è cambiata (nuovo `avventura.json` o nuove immagini):
 
@@ -323,7 +325,7 @@ sudo /opt/tavolo/deploy/comando.sh avventura:importa -- avventure/ID
 
 - [ ] `curl -sI https://dandzapp.spinfo.it` mostra `strict-transport-security`, `x-frame-options: DENY` e `content-security-policy: frame-ancestors 'none'…`.
 - [ ] `curl -sI http://dandzapp.spinfo.it` risponde 301 verso https.
-- [ ] `sudo deploy/comando.sh email:prova -- tuo@indirizzo.it`: l'email arriva.
+- [ ] `deploy/comando.sh email:prova -- tuo@indirizzo.it`: l'email arriva.
 - [ ] Il Master accede, crea una partita e invita un giocatore; il giocatore accetta dal link.
 - [ ] La riga di stato sotto la mappa dice **"Collegato in tempo reale"**: il WebSocket passa dal proxy. Con "Riconnessione…" fisso, si controlla la configurazione del proxy.
 - [ ] Nella console del browser (F12) non ci sono errori `Content Security Policy`.
@@ -335,7 +337,7 @@ sudo /opt/tavolo/deploy/comando.sh avventura:importa -- avventure/ID
 | Sintomo                                                     | Causa probabile                                                                                                                       |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | "Configurazione non valida: MAILER_DSN…" all'avvio          | Il DSN non è `smtp://…` o `smtps://…`, oppure contiene un percorso. Controlla anche i caratteri speciali nella password.              |
-| Le email non arrivano                                       | `sudo deploy/comando.sh email:prova -- …` mostra l'errore SMTP. Con `MAILER_DSN` vuoto le email sono solo nel log.                    |
+| Le email non arrivano                                       | `deploy/comando.sh email:prova -- …` mostra l'errore SMTP. Con `MAILER_DSN` vuoto le email sono solo nel log.                         |
 | Si accede, ma al tavolo resta "Riconnessione…"              | Il proxy non inoltra l'upgrade a WebSocket (Apache: `upgrade=websocket` e modulo `proxy_wstunnel`; nginx: `Upgrade` e `Connection`).  |
 | Accesso impossibile: "Richiesta da un sito non autorizzato" | `APP_URL` diverso dall'indirizzo usato nel browser (anche http/https o la porta): il server rifiuta le richieste da un'altra origine. |
 | Il cookie di sessione non resta                             | `APP_URL` deve cominciare con `https://`: solo così il cookie è `Secure`.                                                             |
@@ -391,13 +393,34 @@ sudo systemctl restart tavolo
 curl -s http://127.0.0.1:3010/api/salute
 ```
 
-**Script (punti 6, 9 e 10).** `comando.sh` e `aggiorna.sh` leggono utente e cartella da `TAVOLO_UTENTE` e `TAVOLO_CARTELLA`:
+**Script e servizi: `deploy.conf`.** Gli script non hanno percorsi scritti dentro: leggono tutto da un file di configurazione, cercato in quest'ordine: `$TAVOLO_CONF`, `/etc/tavolo/deploy.conf`, `deploy/deploy.conf` (ignorato da git). Si parte dal modello:
 
 ```bash
-sudo TAVOLO_UTENTE=dandzapp TAVOLO_CARTELLA=/home/dandzapp/public_html deploy/comando.sh db:migra
-sudo TAVOLO_UTENTE=dandzapp TAVOLO_CARTELLA=/home/dandzapp/public_html deploy/aggiorna.sh
+cp /home/dandzapp/public_html/deploy/deploy.conf.esempio /etc/tavolo/deploy.conf
+nano /etc/tavolo/deploy.conf
 ```
 
-Nel backup, `ExecStart` di `tavolo-backup.service` va portato a `/home/dandzapp/public_html/deploy/backup.sh`. Nel ripristino, la cartella dei dati torna all'utente scelto: `sudo chown -R dandzapp:dandzapp /var/lib/tavolo`.
+```ini
+TAVOLO_CARTELLA=/home/dandzapp/public_html   # dove sta il codice
+TAVOLO_UTENTE=dandzapp                       # chi lo possiede e fa girare Node
+TAVOLO_GRUPPO=dandzapp
+TAVOLO_RAMO=main
+ENV_FILE=/etc/tavolo/tavolo.env              # percorso del file .env
+TAVOLO_SERVIZIO=tavolo                       # nome del servizio systemd
+TAVOLO_DATI=/var/lib/tavolo                  # DATA_DIR del .env
+TAVOLO_BACKUP=/var/backups/tavolo
+TAVOLO_BACKUP_CNF=/etc/tavolo/backup.my.cnf
+TAVOLO_DB=tavolo
+```
+
+Poi, da root e senza `sudo`:
+
+```bash
+/home/dandzapp/public_html/deploy/installa-systemd.sh   # scrive i file systemd con questi valori
+/home/dandzapp/public_html/deploy/comando.sh db:migra
+/home/dandzapp/public_html/deploy/aggiorna.sh
+```
+
+`installa-systemd.sh` sostituisce `tavolo.service` e i file del backup (utente, gruppo, cartella, `ENV_FILE`, cartella dei dati, `ExecStart` del backup) e imposta da solo `ProtectHome=read-only` se il codice sta sotto `/home`: non serve più modificarli a mano. Rilancialo dopo ogni modifica di `deploy.conf`. Le variabili d'ambiente (es. `TAVOLO_RAMO=altro aggiorna.sh`) hanno la precedenza sul file. Nel ripristino, la cartella dei dati torna all'utente scelto: `chown -R dandzapp:dandzapp /var/lib/tavolo`.
 
 **Cosa si perde.** Con l'utente `tavolo` il servizio non può modificare il proprio codice. Con un utente che possiede il codice, e magari ha anche un login, l'isolamento è minore: `ProtectHome=read-only` e `ProtectSystem=strict` lo limitano mentre il servizio gira, ma non quando si entra con quell'utente.

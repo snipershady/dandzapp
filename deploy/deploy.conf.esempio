@@ -1,0 +1,28 @@
+# Configurazione generale degli script di deploy (aggiorna.sh, comando.sh, backup.sh,
+# installa-systemd.sh). Copia in /etc/tavolo/deploy.conf (oppure in deploy/deploy.conf, che git
+# ignora) e adatta. Gli script si lanciano da root, senza sudo:
+#   /opt/tavolo/deploy/aggiorna.sh
+#
+# File letto, in ordine: $TAVOLO_CONF, /etc/tavolo/deploy.conf, deploy/deploy.conf.
+# I valori già presenti nell'ambiente hanno la precedenza.
+
+# Dove è installato il codice (la cartella del repository).
+TAVOLO_CARTELLA=/opt/tavolo
+# Utente di sistema che possiede il codice e fa girare Node.
+TAVOLO_UTENTE=tavolo
+TAVOLO_GRUPPO=tavolo
+# Ramo da distribuire.
+TAVOLO_RAMO=main
+# File dei parametri dell'applicazione (formato .env, vedi tavolo.env.esempio).
+ENV_FILE=/etc/tavolo/tavolo.env
+# Nome del servizio systemd.
+TAVOLO_SERVIZIO=tavolo
+
+# Cartella dei dati (DATA_DIR del file .env): immagini delle avventure importate.
+TAVOLO_DATI=/var/lib/tavolo
+
+# Backup.
+TAVOLO_BACKUP=/var/backups/tavolo
+TAVOLO_BACKUP_CNF=/etc/tavolo/backup.my.cnf
+TAVOLO_DB=tavolo
+TAVOLO_BACKUP_GIORNI=14
